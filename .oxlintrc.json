@@ -1,0 +1,5 @@
+{
+  "rules": {
+    "oxc/no-accumulating-spread": "error"
+  }
+}
