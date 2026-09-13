@@ -19,6 +19,7 @@ import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
 import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety-comment-for-type-assertion.ts";
 import { noCallOnlyAssertionsRule } from "./rules/no-call-only-assertions.ts";
 import { noPassThroughTypeAliasRule } from "./rules/no-pass-through-type-alias.ts";
+import { canonicalClassNames } from "./tailwind/rule.js";
 
 /** Every `deslop/*` rule, each set to `"error"`. Spread into the `rules` field of an oxlint config. */
 export const recommendedRules: Record<string, "error"> = {
@@ -43,7 +44,7 @@ export const recommendedRules: Record<string, "error"> = {
 	"deslop/no-pass-through-type-alias": "error",
 };
 
-/** ESLint flat-config style configs. `recommended` enables every `deslop/*` rule as `"error"`. */
+/** ESLint flat-config style configs. `recommended` enables every `deslop/*` rule as `"error"`, except opt-in rules like `canonical-class-names` (requires `cssPath`). */
 export const configs = {
 	recommended: {
 		name: "deslop/recommended",
@@ -74,6 +75,8 @@ const deslopPlugin = eslintCompatPlugin({
 		"require-safety-comment-for-type-assertion": requireSafetyCommentForTypeAssertionRule,
 		"no-call-only-assertions": noCallOnlyAssertionsRule,
 		"no-pass-through-type-alias": noPassThroughTypeAliasRule,
+		// Opt-in: NOT in `recommendedRules`. Requires a `cssPath` option, so users add it manually.
+		"canonical-class-names": canonicalClassNames,
 	},
 }) as ReturnType<typeof eslintCompatPlugin> & { configs: typeof configs };
 deslopPlugin.configs = configs;

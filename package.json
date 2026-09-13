@@ -1,6 +1,6 @@
 {
   "name": "oxlint-plugin-deslop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Opinionated Oxlint rules that reject low-evidence, low-signal, AI-slop code patterns.",
   "type": "module",
   "exports": "./src/index.ts",
@@ -13,7 +13,17 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@oxlint/plugins": "1.82.0"
+    "@oxlint/plugins": "1.82.0",
+    "@tailwindcss/node": "^4.3.3",
+    "synckit": "^0.11.13"
+  },
+  "peerDependencies": {
+    "tailwindcss": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "tailwindcss": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "26.2.0",

@@ -2,12 +2,12 @@
 
 Opinionated Oxlint rules that reject low-evidence, low-signal, AI-slop code patterns.
 
-Rules are vendored from [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) (generic rules) and [UseStitch/stitch](https://github.com/UseStitch/stitch) (`tools/oxlint-plugins`), all renamed under the `deslop/*` namespace. Both sources are MIT licensed; see Credits below.
+Rules are vendored from [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) (generic rules) alongside additional deslop rules, all renamed under the `deslop/*` namespace. The vendored source is MIT licensed; see Credits below.
 
 ## Install
 
 ```bash
-npm install oxlint-plugin-deslop
+npm install --save-dev oxlint-plugin-deslop
 # @oxlint/plugins comes along as a runtime dependency — keep it in sync with your oxlint version
 ```
 
@@ -86,10 +86,25 @@ Or with `.oxlintrc.json` (list the rules explicitly):
 
 The rules use Oxlint's ESTree and lexical-scope APIs rather than a TypeScript type checker. They resolve same-file aliases but do not infer imported type definitions or cross-file call signatures.
 
+### Opt-in (`deslop/canonical-class-names`, default off)
+
+Enforces canonical Tailwind CSS class spellings with `--fix` support (`mt-[16px]` → `mt-4`). Same source of truth as the Tailwind language server. Excluded from `recommended` because it requires a `cssPath` option — add it manually:
+
+```ts
+export default defineConfig({
+  jsPlugins: [deslopPlugin],
+  rules: {
+    ...deslopConfigs.recommended.rules,
+    "deslop/canonical-class-names": ["warn", { cssPath: "./src/styles.css" }],
+  },
+});
+```
+
+Requires Tailwind CSS v4 (`tailwindcss` is an optional peer). Options: `cssPath` (required, absolute or relative to cwd), `rootFontSize` (default `16`), `attributes` (default `["class", "className"]`), `calleeFunctions` (default `["cn", "clsx", "cva", "twMerge", "tw", "classNames", "cx"]`). Only rewrites individual spellings — ordering/dedup belongs to the formatter. Strings with `${}` interpolations are skipped.
+
 ## Credits
 
 - Generic rules vendored verbatim from [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) (MIT, © Dillon Mulroy), including `src/shared/*`.
-- `no-call-only-assertions` and `no-pass-through-type-alias` adapted from [UseStitch/stitch](https://github.com/UseStitch/stitch) `tools/oxlint-plugins` (MIT, © Stitch) and converted to TypeScript.
 
 ## License
 
