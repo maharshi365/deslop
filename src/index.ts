@@ -16,7 +16,6 @@ import { noUnknownReturnsRule } from "./rules/no-unknown-returns.ts";
 import { noUnknownTypeAliasesRule } from "./rules/no-unknown-type-aliases.ts";
 import { noUnsafeDictionaryTypeRule } from "./rules/no-unsafe-dictionary-type.ts";
 import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
-import { requireReadableSpacingRule } from "./rules/require-readable-spacing.ts";
 import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety-comment-for-type-assertion.ts";
 import { noCallOnlyAssertionsRule } from "./rules/no-call-only-assertions.ts";
 import { noPassThroughTypeAliasRule } from "./rules/no-pass-through-type-alias.ts";
@@ -39,7 +38,6 @@ export const recommendedRules: Record<string, "error"> = {
 	"deslop/no-unknown-type-aliases": "error",
 	"deslop/no-unsafe-dictionary-type": "error",
 	"deslop/no-widen-then-assert": "error",
-	"deslop/require-readable-spacing": "error",
 	"deslop/require-safety-comment-for-type-assertion": "error",
 	"deslop/no-call-only-assertions": "error",
 	"deslop/no-pass-through-type-alias": "error",
@@ -73,7 +71,6 @@ const deslopPlugin = eslintCompatPlugin({
 		"no-unknown-type-aliases": noUnknownTypeAliasesRule,
 		"no-unsafe-dictionary-type": noUnsafeDictionaryTypeRule,
 		"no-widen-then-assert": noWidenThenAssertRule,
-		"require-readable-spacing": requireReadableSpacingRule,
 		"require-safety-comment-for-type-assertion": requireSafetyCommentForTypeAssertionRule,
 		"no-call-only-assertions": noCallOnlyAssertionsRule,
 		"no-pass-through-type-alias": noPassThroughTypeAliasRule,

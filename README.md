@@ -51,7 +51,6 @@ Or with `.oxlintrc.json` (list the rules explicitly):
     "deslop/no-unknown-type-aliases": "error",
     "deslop/no-unsafe-dictionary-type": "error",
     "deslop/no-widen-then-assert": "error",
-    "deslop/require-readable-spacing": "error",
     "deslop/require-safety-comment-for-type-assertion": "error",
     "deslop/no-call-only-assertions": "error",
     "deslop/no-pass-through-type-alias": "error"
@@ -81,7 +80,6 @@ Or with `.oxlintrc.json` (list the rules explicitly):
 | `no-unknown-type-aliases` | Rejects aliases whose resolved type is `unknown`. |
 | `no-unsafe-dictionary-type` | Rejects dictionary value contracts based on `unknown`, `any`, `object`, `{}`. |
 | `no-widen-then-assert` | Rejects flows that widen known evidence then assert it back to a narrower type. |
-| `require-readable-spacing` | Autofixes missing blank lines between declarations and around control flow. Run `oxlint --fix`, then your formatter, then lint again. |
 | `require-safety-comment-for-type-assertion` | Requires a nearby invariant justification comment (default marker `SAFETY:`) for each non-const assertion. |
 | `no-call-only-assertions` | Flags tests whose every assertion only checks a mock was called (`toHaveBeenCalledWith` stays allowed). |
 | `no-pass-through-type-alias` | Disallows type aliases that only rename another type. |
@@ -90,7 +88,7 @@ The rules use Oxlint's ESTree and lexical-scope APIs rather than a TypeScript ty
 
 ## Credits
 
-- Generic rules vendored verbatim from [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) (MIT, © Dillon Mulroy), including `src/shared/*` and the `src/vendor/eslint-stylistic/*` padding-line engine (MIT, see `src/vendor/eslint-stylistic/LICENSE` and `UPSTREAM.md`).
+- Generic rules vendored verbatim from [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) (MIT, © Dillon Mulroy), including `src/shared/*`.
 - `no-call-only-assertions` and `no-pass-through-type-alias` adapted from [UseStitch/stitch](https://github.com/UseStitch/stitch) `tools/oxlint-plugins` (MIT, © Stitch) and converted to TypeScript.
 
 ## License
