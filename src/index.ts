@@ -19,7 +19,7 @@ import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
 import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety-comment-for-type-assertion.ts";
 import { noCallOnlyAssertionsRule } from "./rules/no-call-only-assertions.ts";
 import { noPassThroughTypeAliasRule } from "./rules/no-pass-through-type-alias.ts";
-import { canonicalClassNames } from "./tailwind/rule.js";
+import { canonicalClassNames } from "./tailwind/rule.ts";
 
 /** Every `deslop/*` rule, each set to `"error"`. Spread into the `rules` field of an oxlint config. */
 export const recommendedRules: Record<string, "error"> = {
