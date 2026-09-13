@@ -65,7 +65,6 @@ Or with `.oxlintrc.json` (list the rules explicitly):
 
 | Rule | Description |
 | --- | --- |
-| --- | --- |
 | `no-array-filter-map` | Rejects adjacent eager array filter/map passes; allows lazy iterator pipelines. |
 | `no-reduce-accumulator-copy` | Rejects non-spread accumulator copies inside reducers. Enable native `oxc/no-accumulating-spread` alongside it. |
 | `no-chained-type-assertions` | Rejects nested `as` / angle-bracket assertions that fabricate evidence (`as const` chains stay valid). |
