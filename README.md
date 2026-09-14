@@ -23,17 +23,25 @@ import deslopPlugin, { configs as deslopConfigs } from "oxlint-plugin-deslop";
 
 export default defineConfig({
   jsPlugins: [deslopPlugin],
+  options: {
+    ...deslopConfigs.recommended.options,
+  },
   rules: {
     ...deslopConfigs.recommended.rules,
   },
 });
 ```
 
+The `recommended` config also enables standard type-aware rules (`typescript/no-deprecated`, `typescript/no-floating-promises`), so it sets `options.typeAware`. Type-aware linting requires the `oxlint-tsgolint` package to be installed.
+
 Or with `.oxlintrc.json` (list the rules explicitly):
 
 ```json
 {
   "jsPlugins": ["oxlint-plugin-deslop"],
+  "options": {
+    "typeAware": true
+  },
   "rules": {
     "deslop/no-array-filter-map": "error",
     "deslop/no-reduce-accumulator-copy": "error",
@@ -53,7 +61,9 @@ Or with `.oxlintrc.json` (list the rules explicitly):
     "deslop/no-widen-then-assert": "error",
     "deslop/require-safety-comment-for-type-assertion": "error",
     "deslop/no-call-only-assertions": "error",
-    "deslop/no-pass-through-type-alias": "error"
+    "deslop/no-pass-through-type-alias": "error",
+    "typescript/no-deprecated": "error",
+    "typescript/no-floating-promises": "error"
   }
 }
 ```
@@ -86,6 +96,13 @@ Or with `.oxlintrc.json` (list the rules explicitly):
 
 The rules use Oxlint's ESTree and lexical-scope APIs rather than a TypeScript type checker. They resolve same-file aliases but do not infer imported type definitions or cross-file call signatures.
 
+### Standard (`typescript/*`, in `recommended`)
+
+| Rule | Description |
+| --- | --- |
+| `typescript/no-deprecated` | Disallows using code marked `@deprecated`. Requires type-aware linting. |
+| `typescript/no-floating-promises` | Disallows floating Promises without handling. Requires type-aware linting. |
+
 ### Opt-in (`deslop/canonical-class-names`, default off)
 
 Enforces canonical Tailwind CSS class spellings with `--fix` support (`mt-[16px]` → `mt-4`). Same source of truth as the Tailwind language server. Excluded from `recommended` because it requires a `cssPath` option — add it manually:
@@ -93,6 +110,9 @@ Enforces canonical Tailwind CSS class spellings with `--fix` support (`mt-[16px]
 ```ts
 export default defineConfig({
   jsPlugins: [deslopPlugin],
+  options: {
+    ...deslopConfigs.recommended.options,
+  },
   rules: {
     ...deslopConfigs.recommended.rules,
     "deslop/canonical-class-names": ["warn", { cssPath: "./src/styles.css" }],

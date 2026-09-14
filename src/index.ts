@@ -21,7 +21,7 @@ import { noCallOnlyAssertionsRule } from "./rules/no-call-only-assertions.ts";
 import { noPassThroughTypeAliasRule } from "./rules/no-pass-through-type-alias.ts";
 import { canonicalClassNames } from "./tailwind/rule.ts";
 
-/** Every `deslop/*` rule, each set to `"error"`. Spread into the `rules` field of an oxlint config. */
+/** Every `deslop/*` rule, plus selected standard rules, each set to `"error"`. Spread into the `rules` field of an oxlint config. */
 export const recommendedRules: Record<string, "error"> = {
 	"deslop/no-array-filter-map": "error",
 	"deslop/no-reduce-accumulator-copy": "error",
@@ -42,12 +42,15 @@ export const recommendedRules: Record<string, "error"> = {
 	"deslop/require-safety-comment-for-type-assertion": "error",
 	"deslop/no-call-only-assertions": "error",
 	"deslop/no-pass-through-type-alias": "error",
+	"typescript/no-deprecated": "error",
+	"typescript/no-floating-promises": "error",
 };
 
-/** ESLint flat-config style configs. `recommended` enables every `deslop/*` rule as `"error"`, except opt-in rules like `canonical-class-names` (requires `cssPath`). */
+/** ESLint flat-config style configs. `recommended` enables every `deslop/*` rule as `"error"` (except opt-in rules like `canonical-class-names`), plus standard `typescript/*` rules. The `typescript/*` rules require type-aware linting (`options.typeAware`), so `recommended` sets it. */
 export const configs = {
 	recommended: {
 		name: "deslop/recommended",
+		options: { typeAware: true },
 		rules: recommendedRules,
 	},
 };
