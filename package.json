@@ -1,6 +1,6 @@
 {
   "name": "ai-deslop",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Opinionated Oxlint rules that reject low-evidence, low-signal, AI-slop code patterns.",
   "type": "module",
   "main": "./dist/index.js",
@@ -19,6 +19,7 @@
     "prepublishOnly": "npm run build",
     "check": "npm run build && oxlint src && tsc --noEmit",
     "lint": "oxlint src",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -37,7 +38,8 @@
   "devDependencies": {
     "@types/node": "26.2.0",
     "oxlint": "1.82.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "vitest": "^5.0.1"
   },
   "license": "MIT",
   "repository": {
