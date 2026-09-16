@@ -1,14 +1,23 @@
 {
   "name": "ai-deslop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Opinionated Oxlint rules that reject low-evidence, low-signal, AI-slop code patterns.",
   "type": "module",
-  "exports": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "files": [
-    "src"
+    "dist"
   ],
   "scripts": {
-    "check": "oxlint src && tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build",
+    "check": "npm run build && oxlint src && tsc --noEmit",
     "lint": "oxlint src",
     "typecheck": "tsc --noEmit"
   },

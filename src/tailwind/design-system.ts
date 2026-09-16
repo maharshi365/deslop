@@ -21,7 +21,10 @@ type WorkerJob = LoadJob | CanonicalizeJob;
 type WorkerResult = { ok: true } | Array<string>;
 type WorkerFunction = (job: WorkerJob) => Promise<WorkerResult>;
 
-const workerPath = fileURLToPath(new URL("./worker.ts", import.meta.url));
+// Resolved relative to the compiled output: `tsc` emits `worker.ts` as
+// `dist/tailwind/worker.js` next to this file, and consumers load the
+// package from `dist`, where Node cannot type-strip `.ts` under node_modules.
+const workerPath = fileURLToPath(new URL("./worker.js", import.meta.url));
 let syncCall: ReturnType<typeof createSyncFn<WorkerFunction>> | null = null;
 const loadedSystems = new Map<string, number>();
 

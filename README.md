@@ -11,7 +11,7 @@ npm install --save-dev ai-deslop
 # @oxlint/plugins comes along as a runtime dependency — keep it in sync with your oxlint version
 ```
 
-Requires a runtime with native TypeScript plugin support: Bun, Deno, or Node.js >= 22.18 / 20.19.
+Ships compiled JavaScript — works with any oxlint JS-plugin runtime (Bun, Deno, or Node.js).
 
 ## Usage
 
@@ -19,10 +19,10 @@ Register the plugin in `oxlint.config.ts` and enable every rule as an error via 
 
 ```ts
 import { defineConfig } from "oxlint";
-import deslopPlugin, { configs as deslopConfigs } from "ai-deslop";
+import { configs as deslopConfigs } from "ai-deslop";
 
 export default defineConfig({
-  jsPlugins: [deslopPlugin],
+  jsPlugins: ["ai-deslop"],
   options: {
     ...deslopConfigs.recommended.options,
   },
@@ -108,8 +108,11 @@ The rules use Oxlint's ESTree and lexical-scope APIs rather than a TypeScript ty
 Enforces canonical Tailwind CSS class spellings with `--fix` support (`mt-[16px]` → `mt-4`). Same source of truth as the Tailwind language server. Excluded from `recommended` because it requires a `cssPath` option — add it manually:
 
 ```ts
+import { defineConfig } from "oxlint";
+import { configs as deslopConfigs } from "ai-deslop";
+
 export default defineConfig({
-  jsPlugins: [deslopPlugin],
+  jsPlugins: ["ai-deslop"],
   options: {
     ...deslopConfigs.recommended.options,
   },
