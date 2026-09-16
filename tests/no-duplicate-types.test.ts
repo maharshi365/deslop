@@ -16,6 +16,40 @@ ruleTester.run("no-duplicate-types", noDuplicateTypesRule, {
 		"type User = { id: string; email: number }",
 		"type First<T> = { value: T; tag: string }; type Second<U> = { value: U; tag: number };",
 		"type Unsupported = { callback(): void }; type AlsoUnsupported = { callback(): void };",
+		{
+			name: "ignores top-level intersection aliases",
+			code: `
+				type TriggerDoc = GitHubTriggerDocFields & {
+					schemaVersion: number;
+					revision: number;
+					orgId: ObjectId;
+					factoryId: ObjectId;
+					createdBy: ObjectId;
+					createdAt: Date;
+					updatedAt: Date;
+					updatedBy: ObjectId;
+					admissionVersion?: number;
+				};
+				type RenamedTriggerDoc = GitHubTriggerDocFields & {
+					schemaVersion: number;
+					revision: number;
+					orgId: ObjectId;
+					factoryId: ObjectId;
+					createdBy: ObjectId;
+					createdAt: Date;
+					updatedAt: Date;
+					updatedBy: ObjectId;
+					admissionVersion?: number;
+				};
+			`,
+		},
+		{
+			name: "ignores top-level utility type aliases",
+			code: `
+				export type GitHubTrigger = Extract<Trigger, { provider: 'github' }>;
+				export type RenamedGitHubTrigger = Extract<Trigger, { provider: 'github' }>;
+			`,
+		},
 	],
 	invalid: [
 		{

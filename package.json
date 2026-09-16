@@ -1,6 +1,6 @@
 {
   "name": "ai-deslop",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Opinionated Oxlint rules that reject low-evidence, low-signal, AI-slop code patterns.",
   "type": "module",
   "main": "./dist/index.js",

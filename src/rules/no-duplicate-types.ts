@@ -94,7 +94,10 @@ function canonicalDeclaration(node: TypeDeclaration): string | null {
 	for (const [index, parameter] of (node.typeParameters?.params ?? []).entries()) {
 		parameters.set(parameter.name.name, `$${index}`);
 	}
-	if (node.type === "TSTypeAliasDeclaration") return canonicalType(node.typeAnnotation, parameters);
+	if (node.type === "TSTypeAliasDeclaration") {
+		if (node.typeAnnotation.type !== "TSTypeLiteral") return null;
+		return canonicalMembers(node.typeAnnotation.members, parameters);
+	}
 	if (node.extends.length > 0) return null;
 	return canonicalMembers(node.body.body, parameters);
 }
@@ -119,9 +122,15 @@ export const noDuplicateTypesRule = defineRule({
 			context.report({ node, messageId: "duplicate", data: { message: options.message ?? "This type is structurally identical to an existing declaration.", firstName: first.name, firstFile: first.filename } });
 		};
 		const inspect = (node: TypeDeclaration) => {
+			let properties: number;
+			if (node.type === "TSTypeAliasDeclaration") {
+				if (node.typeAnnotation.type !== "TSTypeLiteral") return;
+				properties = node.typeAnnotation.members.length;
+			} else {
+				properties = node.body.body.length;
+			}
 			const fingerprint = canonicalDeclaration(node);
 			if (fingerprint === null) return;
-			const properties = node.type === "TSTypeAliasDeclaration" && node.typeAnnotation.type === "TSTypeLiteral" ? node.typeAnnotation.members.length : node.type === "TSInterfaceDeclaration" ? node.body.body.length : Infinity;
 			if (properties < (options.minProperties ?? 2)) return;
 			report(node, fingerprint);
 		};
