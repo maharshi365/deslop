@@ -1,4 +1,4 @@
-# oxlint-plugin-deslop
+# ai-deslop
 
 Opinionated Oxlint rules that reject low-evidence, low-signal, AI-slop code patterns.
 
@@ -7,7 +7,7 @@ Rules are vendored from [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-sl
 ## Install
 
 ```bash
-npm install --save-dev oxlint-plugin-deslop
+npm install --save-dev ai-deslop
 # @oxlint/plugins comes along as a runtime dependency — keep it in sync with your oxlint version
 ```
 
@@ -19,7 +19,7 @@ Register the plugin in `oxlint.config.ts` and enable every rule as an error via 
 
 ```ts
 import { defineConfig } from "oxlint";
-import deslopPlugin, { configs as deslopConfigs } from "oxlint-plugin-deslop";
+import deslopPlugin, { configs as deslopConfigs } from "ai-deslop";
 
 export default defineConfig({
   jsPlugins: [deslopPlugin],
@@ -38,7 +38,7 @@ Or with `.oxlintrc.json` (list the rules explicitly):
 
 ```json
 {
-  "jsPlugins": ["oxlint-plugin-deslop"],
+  "jsPlugins": ["ai-deslop"],
   "options": {
     "typeAware": true
   },

@@ -1,5 +1,5 @@
 {
-  "name": "oxlint-plugin-deslop",
+  "name": "ai-deslop",
   "version": "0.2.0",
   "description": "Opinionated Oxlint rules that reject low-evidence, low-signal, AI-slop code patterns.",
   "type": "module",
@@ -30,5 +30,24 @@
     "oxlint": "1.82.0",
     "typescript": "7.0.2"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maharshi365/deslop.git"
+  },
+  "homepage": "https://github.com/maharshi365/deslop#readme",
+  "bugs": {
+    "url": "https://github.com/maharshi365/deslop/issues"
+  },
+  "keywords": [
+    "oxlint",
+    "oxlint-plugin",
+    "eslint",
+    "ai-slop",
+    "code-quality",
+    "typescript"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }
