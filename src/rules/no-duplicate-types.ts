@@ -87,7 +87,12 @@ export const noDuplicateTypesRule = defineRule({
 			}
 		};
 		return {
-			Program() { options = (context.options[0] as RuleOptions | undefined) ?? {}; },
+			Program() {
+				options = (context.options[0] as RuleOptions | undefined) ?? {};
+				zodNamespaces.clear(); valibotNamespaces.clear(); arkTypeFunctions.clear(); valibotFunctions.clear();
+				drizzleTables.clear(); drizzleSchemaFactories.clear(); drizzleSchemaObjects.clear(); drizzleBuilders.clear(); drizzleModels.clear(); drizzleAliases.length = 0;
+				hasArkTypeImport = false;
+			},
 			ImportDeclaration: trackImport,
 			TSTypeAliasDeclaration(node) { inspectType(node); drizzleAliases.push(node); },
 			TSInterfaceDeclaration: inspectType,

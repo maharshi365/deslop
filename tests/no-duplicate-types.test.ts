@@ -344,6 +344,20 @@ ruleTester.run("no-duplicate-types", noDuplicateTypesRule, {
 			errors: [{ messageId: "duplicate" }],
 		},
 		{
+			name: "compares SQLite number-mode integer columns with shared row fields",
+			code: `
+				import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const todos = sqliteTable("todos", {
+					id: text("id").primaryKey(),
+					position: integer("position", { mode: "number" }).notNull(),
+					updatedAt: integer("updated_at", { mode: "number" }),
+				});
+				type SessionTodo = { id: string; position: number; updatedAt: number | null };
+			`,
+			options: [{ drizzle: { models: ["select"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
 			name: "compares schema-qualified Postgres table models with manual row mirrors",
 			code: `
 				import { pgSchema, text } from "drizzle-orm/pg-core";

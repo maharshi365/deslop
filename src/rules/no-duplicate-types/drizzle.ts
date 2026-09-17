@@ -11,7 +11,8 @@ function canonicalIntegerType(node: ESTree.CallExpression, builder: DrizzleBuild
 		if (property.type !== "Property" || property.computed || property.kind !== "init" || propertyKey(property.key) !== "mode" || property.value.type !== "Literal" || typeof property.value.value !== "string") return null;
 		mode = property.value.value;
 	}
-	return mode === null ? builder.type : mode === "boolean" ? "TSBooleanKeyword" : null;
+	if (mode === null || mode === "number") return builder.type;
+	return mode === "boolean" ? "TSBooleanKeyword" : null;
 }
 
 function canonicalColumn(node: ESTree.Expression, builders: Map<string, DrizzleBuilder>): { type: string; notNull: boolean; hasDefault: boolean } | null {
