@@ -21,7 +21,11 @@ export default defineConfig({
       message: "Consolidate this duplicate domain contract.",
       minProperties: 2,
       schemas: {
-        libraries: ["zod"],
+        libraries: ["zod", "valibot", "arktype"],
+        matchTypes: true
+      },
+      drizzle: {
+        models: ["select", "insert"],
         matchTypes: true
       }
     }]
@@ -39,7 +43,11 @@ The equivalent standalone `.oxlintrc.json` configuration is:
       "message": "Consolidate this duplicate domain contract.",
       "minProperties": 2,
       "schemas": {
-        "libraries": ["zod"],
+        "libraries": ["zod", "valibot", "arktype"],
+        "matchTypes": true
+      },
+      "drizzle": {
+        "models": ["select", "insert"],
         "matchTypes": true
       }
     }]
@@ -54,8 +62,11 @@ The equivalent standalone `.oxlintrc.json` configuration is:
 | `message` | `This type is structurally identical to an existing declaration.` | Text shown before the location of the first matching declaration. |
 | `minProperties` | `2` | Ignore declarations with fewer members. Set this to `0` to include empty declarations. |
 | `schemas` | unset | Enables inference from configured runtime schema libraries. |
-| `schemas.libraries` | required | Schema-library adapters to use. Currently supports `zod`. |
+| `schemas.libraries` | required | Schema-library adapters to use: `zod`, `valibot`, and `arktype`. |
 | `schemas.matchTypes` | `true` | Compare inferred schemas with interfaces and object type aliases. Set to `false` to compare schemas only. |
+| `drizzle` | unset | Enables inference from configured Drizzle table models. |
+| `drizzle.models` | `select`, `insert` | Models to infer from each supported table. |
+| `drizzle.matchTypes` | `true` | Compare inferred Drizzle models with schemas and TypeScript declarations. Set to `false` to compare each Drizzle model kind only. |
 
 Both options are optional. To use only the defaults:
 
@@ -99,7 +110,17 @@ interface Account {
 
 The Zod adapter recognizes named or namespace imports from `zod`, top-level `z.object(...)` schemas, nested objects, primitives, literals, string enums, arrays, unions, and `optional`, `nullable`, and `nullish`. It intentionally ignores validation-only modifiers such as `min`, `email`, `regex`, and `default`, because the rule compares inferred TypeScript shape rather than validator behavior.
 
-Dynamic schema construction, transforms, preprocessors, lazy schemas, referenced schema variables, records, tuples, intersections, discriminated unions, custom validators, and unrecognized Zod APIs are skipped. Standard Schema itself does not provide a portable structural schema AST, so additional Standard Schema-compatible validators require their own source adapter before they can be enabled in `schemas.libraries`.
+The Valibot adapter recognizes named and namespace imports, static `object(...)` schemas, primitives, literals, `picklist`, arrays, unions, and `optional`, `nullable`, and `nullish`. It skips defaults, fallbacks, pipes, transforms, enum variables, object-rest schemas, and other APIs that can change output shape or need value resolution.
+
+The ArkType adapter recognizes `type({ ... })` with static inline object definitions. It supports nested objects, primitive keywords, literals, unions, arrays, and keys suffixed with `?`. References, morphs, defaults, index signatures, undeclared-key behavior, fluent calls, and complex ArkType grammar are skipped.
+
+## Drizzle Models
+
+Drizzle tables are not Standard Schema validators, but their declarations infer TypeScript models that are useful to compare with runtime schemas and explicit contracts. Configure `drizzle` to infer `select`, `insert`, or both models from `pgTable`, `mysqlTable`, and `sqliteTable` declarations.
+
+The initial adapter supports direct imported `text`, `varchar`, `uuid`, `char`, `integer`, `int`, `serial`, `smallint`, and `boolean` columns. It accounts for `notNull`, primary keys, and supported default methods when determining nullability and insert optionality. Custom types, generated or identity columns, `$type`, dialect-specific modes, and unsupported builder chains are skipped rather than guessed.
+
+Dynamic schema construction, transforms, preprocessors, lazy schemas, referenced schema variables, records, tuples, intersections, discriminated unions, custom validators, and unrecognized library APIs are skipped. Standard Schema itself does not provide a portable structural schema AST, so additional Standard Schema-compatible validators require their own source adapter before they can be enabled in `schemas.libraries`.
 
 The rule has no fixer and does not use fuzzy matching, embeddings, or an LLM.
 

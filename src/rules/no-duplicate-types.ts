@@ -3,6 +3,7 @@ import type { ESTree } from "@oxlint/plugins";
 
 type TypeDeclaration = ESTree.TSTypeAliasDeclaration | ESTree.TSInterfaceDeclaration;
 type ReportNode = TypeDeclaration | ESTree.VariableDeclarator;
+type DuplicateKind = "type" | "schema" | "drizzle-select" | "drizzle-insert";
 
 interface RuleOptions {
 	message?: string;
@@ -11,9 +12,14 @@ interface RuleOptions {
 		libraries?: string[];
 		matchTypes?: boolean;
 	};
+	drizzle?: {
+		models?: ("select" | "insert")[];
+		matchTypes?: boolean;
+	};
 }
 
 interface SeenType {
+	node: ReportNode;
 	name: string;
 	filename: string;
 }
@@ -120,6 +126,16 @@ function memberCall(node: ESTree.Expression): { name: string; object: ESTree.Exp
 	return { name: node.callee.property.name, object: node.callee.object, arguments_: node.arguments as ESTree.Expression[] };
 }
 
+function factoryCall(node: ESTree.Expression, namespaces: Set<string>, functions: Map<string, string>): { name: string; arguments_: ESTree.Expression[] } | null {
+	if (node.type !== "CallExpression" || node.arguments.some((argument) => argument.type === "SpreadElement")) return null;
+	if (node.callee.type === "Identifier") {
+		const name = functions.get(node.callee.name);
+		return name === undefined ? null : { name, arguments_: node.arguments as ESTree.Expression[] };
+	}
+	if (node.callee.type !== "MemberExpression" || node.callee.computed || node.callee.object.type !== "Identifier" || node.callee.property.type !== "Identifier" || !namespaces.has(node.callee.object.name)) return null;
+	return { name: node.callee.property.name, arguments_: node.arguments as ESTree.Expression[] };
+}
+
 function schemaLiteral(node: ESTree.Expression): string | null {
 	if (node.type !== "Literal") return null;
 	if (typeof node.value === "string") return JSON.stringify(node.value);
@@ -216,24 +232,167 @@ function canonicalSchema(node: ESTree.Expression, zodNamespaces: Set<string>): s
 	}
 }
 
+function canonicalValibotProperty(node: ESTree.Expression, namespaces: Set<string>, functions: Map<string, string>): { type: string; optional: boolean } | null {
+	const call = factoryCall(node, namespaces, functions);
+	if (call !== null && ["optional", "nullable", "nullish"].includes(call.name)) {
+		if (call.arguments_.length !== 1) return null;
+		const inner = canonicalValibot(call.arguments_[0], namespaces, functions);
+		if (inner === null) return null;
+		const nullable = call.name === "nullable" || call.name === "nullish";
+		return { type: nullable ? `union(${["TSNullKeyword", inner].sort().join(",")})` : inner, optional: call.name === "optional" || call.name === "nullish" };
+	}
+	const type = canonicalValibot(node, namespaces, functions);
+	return type === null ? null : { type, optional: false };
+}
+
+function canonicalValibotObject(node: ESTree.Expression, namespaces: Set<string>, functions: Map<string, string>): { fingerprint: string; properties: number } | null {
+	if (node.type !== "ObjectExpression") return null;
+	const members: string[] = [];
+	for (const property of node.properties) {
+		if (property.type !== "Property" || property.computed || property.kind !== "init") return null;
+		const key = propertyKey(property.key);
+		if (key === null) return null;
+		const value = canonicalValibotProperty(property.value, namespaces, functions);
+		if (value === null) return null;
+		members.push(`prop(${key},${value.optional ? "?" : "!"},rw,${value.type})`);
+	}
+	members.sort();
+	return { fingerprint: `{${members.join(",")}}`, properties: members.length };
+}
+
+function canonicalValibot(node: ESTree.Expression, namespaces: Set<string>, functions: Map<string, string>): string | null {
+	const call = factoryCall(node, namespaces, functions);
+	if (call === null) return null;
+	switch (call.name) {
+		case "string": return call.arguments_.length === 0 ? "TSStringKeyword" : null;
+		case "number": return call.arguments_.length === 0 ? "TSNumberKeyword" : null;
+		case "boolean": return call.arguments_.length === 0 ? "TSBooleanKeyword" : null;
+		case "bigint": return call.arguments_.length === 0 ? "TSBigIntKeyword" : null;
+		case "unknown": return call.arguments_.length === 0 ? "TSUnknownKeyword" : null;
+		case "any": return call.arguments_.length === 0 ? "TSAnyKeyword" : null;
+		case "never": return call.arguments_.length === 0 ? "TSNeverKeyword" : null;
+		case "null": return call.arguments_.length === 0 ? "TSNullKeyword" : null;
+		case "undefined": return call.arguments_.length === 0 ? "TSUndefinedKeyword" : null;
+		case "void": return call.arguments_.length === 0 ? "TSVoidKeyword" : null;
+		case "literal": {
+			if (call.arguments_.length !== 1) return null;
+			const value = schemaLiteral(call.arguments_[0]);
+			return value === null ? null : `literal(${value})`;
+		}
+		case "picklist": case "union": {
+			if (call.arguments_.length !== 1 || call.arguments_[0].type !== "ArrayExpression") return null;
+			const types = call.arguments_[0].elements.map((element) => element === null || element.type === "SpreadElement" ? null : call.name === "picklist" ? schemaLiteral(element) : canonicalValibot(element, namespaces, functions));
+			if (types.some((type) => type === null)) return null;
+			return `union(${[...new Set(types)].sort().join(",")})`;
+		}
+		case "array": {
+			if (call.arguments_.length !== 1) return null;
+			const element = canonicalValibot(call.arguments_[0], namespaces, functions);
+			return element === null ? null : `array(${element})`;
+		}
+		case "object": {
+			if (call.arguments_.length !== 1) return null;
+			return canonicalValibotObject(call.arguments_[0], namespaces, functions)?.fingerprint ?? null;
+		}
+		default: return null;
+	}
+}
+
+function canonicalArkString(value: string): string | null {
+	let current = value.trim();
+	while (current.startsWith("(") && current.endsWith(")")) current = current.slice(1, -1).trim();
+	if (current.endsWith("[]")) {
+		const element = canonicalArkString(current.slice(0, -2));
+		return element === null ? null : `array(${element})`;
+	}
+	if (current.includes("|")) {
+		const types = current.split("|").map((part) => canonicalArkString(part));
+		if (types.some((type) => type === null)) return null;
+		return `union(${[...new Set(types)].sort().join(",")})`;
+	}
+	if (/^'(?:[^'\\]|\\.)*'$/.test(current) || /^"(?:[^"\\]|\\.)*"$/.test(current)) return `literal(${JSON.stringify(current.slice(1, -1))})`;
+	if (/^-?\d+(?:\.\d+)?$/.test(current) || current === "true" || current === "false") return `literal(${current})`;
+	const keywords: Record<string, string> = { string: "TSStringKeyword", number: "TSNumberKeyword", boolean: "TSBooleanKeyword", bigint: "TSBigIntKeyword", unknown: "TSUnknownKeyword", any: "TSAnyKeyword", never: "TSNeverKeyword", null: "TSNullKeyword", undefined: "TSUndefinedKeyword", void: "TSVoidKeyword" };
+	return keywords[current] ?? null;
+}
+
+function canonicalArkObject(node: ESTree.Expression): { fingerprint: string; properties: number } | null {
+	if (node.type !== "ObjectExpression") return null;
+	const members: string[] = [];
+	for (const property of node.properties) {
+		if (property.type !== "Property" || property.computed || property.kind !== "init") return null;
+		const keyValue = property.key as { value?: unknown };
+		const rawKey = typeof keyValue.value === "string" ? keyValue.value : propertyKey(property.key);
+		if (rawKey === null) return null;
+		const optional = rawKey.endsWith("?");
+		const key = optional ? rawKey.slice(0, -1) : rawKey;
+		const literal = property.value as { value?: unknown };
+		const type = typeof literal.value === "string" ? canonicalArkString(literal.value) : canonicalArkObject(property.value)?.fingerprint;
+		if (type === null || type === undefined) return null;
+		members.push(`prop(${key},${optional ? "?" : "!"},rw,${type})`);
+	}
+	members.sort();
+	return { fingerprint: `{${members.join(",")}}`, properties: members.length };
+}
+
+function canonicalDrizzleColumn(node: ESTree.Expression, builders: Map<string, string>): { type: string; notNull: boolean; hasDefault: boolean } | null {
+	let current = node;
+	let notNull = false;
+	let hasDefault = false;
+	while (true) {
+		const call = memberCall(current);
+		if (call === null) break;
+		if ((call.name === "notNull" || call.name === "primaryKey") && call.arguments_.length === 0) notNull = true;
+		else if (["default", "defaultNow", "defaultRandom", "$default", "$defaultFn"].includes(call.name)) hasDefault = true;
+		else if (!["primaryKey", "unique", "references", "onUpdate", "$onUpdate", "$onUpdateFn"].includes(call.name)) return null;
+		current = call.object;
+	}
+	if (current.type !== "CallExpression" || current.callee.type !== "Identifier") return null;
+	const type = builders.get(current.callee.name);
+	if (type === undefined) return null;
+	if (current.callee.name === "serial") hasDefault = true;
+	return { type, notNull, hasDefault };
+}
+
+function canonicalDrizzleTable(node: ESTree.Expression, tableFactories: Set<string>, builders: Map<string, string>, model: "select" | "insert"): { fingerprint: string; properties: number } | null {
+	if (node.type !== "CallExpression" || node.callee.type !== "Identifier" || !tableFactories.has(node.callee.name) || node.arguments.length < 2 || node.arguments[1].type === "SpreadElement") return null;
+	const columns = node.arguments[1];
+	if (columns.type !== "ObjectExpression") return null;
+	const members: string[] = [];
+	for (const property of columns.properties) {
+		if (property.type !== "Property" || property.computed || property.kind !== "init") return null;
+		const key = propertyKey(property.key);
+		if (key === null) return null;
+		const column = canonicalDrizzleColumn(property.value, builders);
+		if (column === null) return null;
+		const optional = model === "insert" && (!column.notNull || column.hasDefault);
+		const type = column.notNull ? column.type : `union(${["TSNullKeyword", column.type].sort().join(",")})`;
+		members.push(`prop(${key},${optional ? "?" : "!"},rw,${type})`);
+	}
+	members.sort();
+	return { fingerprint: `{${members.join(",")}}`, properties: members.length };
+}
+
 /** Report exact structural duplicates without TypeScript assignability or fuzzy matching. */
 export const noDuplicateTypesRule = defineRule({
 	meta: {
 		type: "suggestion",
 		docs: { description: "Report structurally identical TypeScript declarations" },
 		messages: { duplicate: "{{message}} First seen as {{firstName}} in {{firstFile}}." },
-		schema: [{ type: "object", properties: { message: { type: "string" }, minProperties: { type: "integer", minimum: 0 }, schemas: { type: "object", properties: { libraries: { type: "array", items: { enum: ["zod"] } }, matchTypes: { type: "boolean" } }, additionalProperties: false } }, additionalProperties: false }],
+		schema: [{ type: "object", properties: { message: { type: "string" }, minProperties: { type: "integer", minimum: 0 }, schemas: { type: "object", properties: { libraries: { type: "array", items: { enum: ["zod", "valibot", "arktype"] } }, matchTypes: { type: "boolean" } }, additionalProperties: false }, drizzle: { type: "object", properties: { models: { type: "array", items: { enum: ["select", "insert"] } }, matchTypes: { type: "boolean" } }, additionalProperties: false } }, additionalProperties: false }],
 	},
 	createOnce(context) {
 		const seen = new Map<string, SeenType>();
 		let options: RuleOptions = {};
-		const report = (node: ReportNode, name: string, fingerprint: string, kind: "type" | "schema") => {
-			const key = options.schemas?.matchTypes === false ? `${kind}:${fingerprint}` : fingerprint;
+		const report = (node: ReportNode, name: string, fingerprint: string, kind: DuplicateKind) => {
+			const isolates = kind === "schema" ? options.schemas?.matchTypes === false : kind.startsWith("drizzle-") && options.drizzle?.matchTypes === false;
+			const key = isolates ? `${kind}:${fingerprint}` : fingerprint;
 			const first = seen.get(key);
 			if (first === undefined) {
-				seen.set(key, { name, filename: context.filename });
+				seen.set(key, { node, name, filename: context.filename });
 				return;
 			}
+			if (first.node === node) return;
 			context.report({ node, messageId: "duplicate", data: { message: options.message ?? "This type is structurally identical to an existing declaration.", firstName: first.name, firstFile: first.filename } });
 		};
 		const inspect = (node: TypeDeclaration) => {
@@ -250,6 +409,12 @@ export const noDuplicateTypesRule = defineRule({
 			report(node, node.id.name, fingerprint, "type");
 		};
 		const zodNamespaces = new Set<string>();
+		const valibotNamespaces = new Set<string>();
+		const valibotFunctions = new Map<string, string>();
+		const arkTypeFunctions = new Set<string>();
+		let hasArkTypeImport = false;
+		const drizzleTables = new Set<string>();
+		const drizzleBuilders = new Map<string, string>();
 		const inspectSchema = (node: ESTree.VariableDeclarator) => {
 			if (options.schemas?.libraries?.includes("zod") !== true || node.id.type !== "Identifier" || node.init === null) return;
 			const call = memberCall(node.init);
@@ -258,18 +423,68 @@ export const noDuplicateTypesRule = defineRule({
 			if (schema === null || schema.properties < (options.minProperties ?? 2)) return;
 			report(node, node.id.name, schema.fingerprint, "schema");
 		};
+		const inspectValibot = (node: ESTree.VariableDeclarator) => {
+			if (options.schemas?.libraries?.includes("valibot") !== true || node.id.type !== "Identifier" || node.init === null) return;
+			const call = factoryCall(node.init, valibotNamespaces, valibotFunctions);
+			if (call === null || call.name !== "object" || call.arguments_.length !== 1) return;
+			const schema = canonicalValibotObject(call.arguments_[0], valibotNamespaces, valibotFunctions);
+			if (schema === null || schema.properties < (options.minProperties ?? 2)) return;
+			report(node, node.id.name, schema.fingerprint, "schema");
+		};
+		const inspectArkType = (node: ESTree.VariableDeclarator) => {
+			const callee = node.init?.type === "CallExpression" ? node.init.callee as { name?: unknown } : null;
+			if (options.schemas?.libraries?.includes("arktype") !== true || node.id.type !== "Identifier" || node.init === null || node.init.type !== "CallExpression" || typeof callee?.name !== "string" || !(arkTypeFunctions.has(callee.name) || hasArkTypeImport && callee.name === "type") || node.init.arguments.length !== 1 || node.init.arguments[0].type === "SpreadElement") return;
+			const schema = canonicalArkObject(node.init.arguments[0]);
+			if (schema === null || schema.properties < (options.minProperties ?? 2)) return;
+			report(node, node.id.name, schema.fingerprint, "schema");
+		};
+		const inspectDrizzle = (node: ESTree.VariableDeclarator) => {
+			if (options.drizzle === undefined || node.id.type !== "Identifier" || node.init === null) return;
+			for (const model of options.drizzle.models ?? ["select", "insert"]) {
+				const table = canonicalDrizzleTable(node.init, drizzleTables, drizzleBuilders, model);
+				if (table !== null && table.properties >= (options.minProperties ?? 2)) report(node, node.id.name, table.fingerprint, `drizzle-${model}`);
+			}
+		};
 		return {
 			Program() { options = (context.options[0] as RuleOptions | undefined) ?? {}; },
 			ImportDeclaration(node) {
-				if (node.source.value !== "zod") return;
+				if (node.source.value === "zod") {
 				for (const specifier of node.specifiers) {
 					if (specifier.type === "ImportNamespaceSpecifier" || specifier.type === "ImportDefaultSpecifier") zodNamespaces.add(specifier.local.name);
 					if (specifier.type === "ImportSpecifier" && specifier.imported.type === "Identifier" && specifier.imported.name === "z") zodNamespaces.add(specifier.local.name);
 				}
+				}
+				if (node.source.value === "valibot") {
+					for (const specifier of node.specifiers) {
+						if (specifier.type === "ImportNamespaceSpecifier") valibotNamespaces.add(specifier.local.name);
+						if (specifier.type === "ImportSpecifier" && specifier.imported.type === "Identifier") valibotFunctions.set(specifier.local.name, specifier.imported.name);
+					}
+				}
+				if (node.source.value === "arktype") {
+					hasArkTypeImport = true;
+					for (const specifier of node.specifiers) {
+					const imported = specifier.type === "ImportSpecifier" ? specifier.imported as { name?: unknown } : null;
+					if (typeof imported?.name === "string" && imported.name === "type") arkTypeFunctions.add(specifier.local.name);
+				}
+				}
+				if (/^drizzle-orm\/(pg|mysql|sqlite)-core$/.test(String(node.source.value))) {
+					for (const specifier of node.specifiers) {
+						if (specifier.type !== "ImportSpecifier" || specifier.imported.type !== "Identifier") continue;
+						if (["pgTable", "mysqlTable", "sqliteTable"].includes(specifier.imported.name)) drizzleTables.add(specifier.local.name);
+						const types: Record<string, string> = { text: "TSStringKeyword", varchar: "TSStringKeyword", uuid: "TSStringKeyword", char: "TSStringKeyword", integer: "TSNumberKeyword", int: "TSNumberKeyword", serial: "TSNumberKeyword", smallint: "TSNumberKeyword", boolean: "TSBooleanKeyword" };
+						const type = types[specifier.imported.name];
+						if (type !== undefined) drizzleBuilders.set(specifier.local.name, type);
+					}
+				}
 			},
 			TSTypeAliasDeclaration: inspect,
 			TSInterfaceDeclaration: inspect,
-			VariableDeclarator: inspectSchema,
+			VariableDeclarator(node) {
+				inspectSchema(node);
+				inspectValibot(node);
+				inspectArkType(node);
+				inspectDrizzle(node);
+			},
 		};
 	},
 });

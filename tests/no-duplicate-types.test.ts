@@ -103,5 +103,45 @@ ruleTester.run("no-duplicate-types", noDuplicateTypesRule, {
 			options: [{ schemas: { libraries: ["zod"] } }],
 			errors: [{ messageId: "duplicate" }],
 		},
+		{
+			name: "compares inferred Valibot object schemas with TypeScript declarations",
+			code: `
+				import { object, string, number, optional } from "valibot";
+				const UserSchema = object({ id: string(), age: optional(number()) });
+				interface Account { age?: number; id: string }
+			`,
+			options: [{ schemas: { libraries: ["valibot"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares inferred ArkType object schemas with TypeScript declarations",
+			code: `
+				import { type } from "arktype";
+				const UserSchema = type({ id: "string", "age?": "number" });
+				interface Account { age?: number; id: string }
+			`,
+			options: [{ schemas: { libraries: ["arktype"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares Drizzle select models with TypeScript declarations",
+			code: `
+				import { pgTable, text, integer } from "drizzle-orm/pg-core";
+				const users = pgTable("users", { id: text("id").notNull(), age: integer("age") });
+				interface User { age: number | null; id: string }
+			`,
+			options: [{ drizzle: { models: ["select"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "infers optional Drizzle insert columns",
+			code: `
+				import { pgTable, serial, text, integer } from "drizzle-orm/pg-core";
+				const users = pgTable("users", { id: serial("id").primaryKey(), name: text("name").notNull(), age: integer("age") });
+				interface NewUser { age?: number | null; id?: number; name: string }
+			`,
+			options: [{ drizzle: { models: ["insert"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
 	],
 });
