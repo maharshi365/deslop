@@ -73,6 +73,44 @@ ruleTester.run("no-duplicate-types", noDuplicateTypesRule, {
 			options: [{ drizzle: { models: ["select", "insert"] } }],
 		},
 		{
+			name: "allows narrowed Drizzle DTOs with $type, blob, and real columns",
+			code: `
+				import { blob, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const files = sqliteTable("files", {
+					id: text("id").primaryKey(),
+					payload: blob("payload").$type<Uint8Array>().notNull(),
+					score: real("score"),
+				});
+				type PublicFile = { id: string; score: number | null };
+			`,
+			options: [{ drizzle: { models: ["select", "insert"] } }],
+		},
+		{
+			name: "allows public DTOs that omit persisted secret fields",
+			code: `
+				import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const users = sqliteTable("users", {
+					id: text("id").primaryKey({ autoIncrement: true }),
+					name: text("name").notNull(),
+					secret: text("secret").notNull(),
+				});
+				type PublicUser = { id: string; name: string };
+			`,
+			options: [{ drizzle: { models: ["select"] } }],
+		},
+		{
+			name: "skips tables with unsupported column chains",
+			code: `
+				import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const users = sqliteTable("users", {
+					id: text("id").primaryKey(),
+					tags: text("tags").array(),
+				});
+				type User = { id: string; tags: string[] | null };
+			`,
+			options: [{ drizzle: { models: ["select"] } }],
+		},
+		{
 			name: "allows compile-time Drizzle contract checks",
 			code: `
 				import type { LocalModel } from "@stitch/shared/models/types";
@@ -208,6 +246,115 @@ ruleTester.run("no-duplicate-types", noDuplicateTypesRule, {
 				type NewUser = { id: string; name: string };
 			`,
 			options: [{ drizzle: { models: ["insert"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares manual Drizzle row mirrors with $type, blob, and real columns",
+			code: `
+				import { blob, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const files = sqliteTable("files", {
+					id: text("id").primaryKey(),
+					payload: blob("payload").$type<Uint8Array>().notNull(),
+					score: real("score"),
+				});
+				type FileRow = { id: string; payload: Uint8Array; score: number | null };
+			`,
+			options: [{ drizzle: { models: ["select"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares Drizzle select aliases with table models",
+			code: `
+				import { blob, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const files = sqliteTable("files", {
+					id: text("id").primaryKey(),
+					payload: blob("payload").$type<Uint8Array>().notNull(),
+					score: real("score"),
+				});
+				type FileRow = typeof files.$inferSelect;
+			`,
+			options: [{ drizzle: { models: ["select"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares Drizzle insert aliases with table models",
+			code: `
+				import { blob, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const files = sqliteTable("files", {
+					id: text("id").primaryKey(),
+					payload: blob("payload").$type<Uint8Array>().notNull(),
+					score: real("score"),
+				});
+				type NewFile = typeof files.$inferInsert;
+			`,
+			options: [{ drizzle: { models: ["insert"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares $type generic overrides with manual row mirrors",
+			code: `
+				import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+				type PrefixedString<T> = string & { prefix: T };
+				const users = sqliteTable("users", {
+					id: text("id").$type<PrefixedString<"id">>().primaryKey({ autoIncrement: true }),
+					name: text("name").notNull(),
+				});
+				type UserRow = { id: PrefixedString<"id">; name: string };
+			`,
+			options: [{ drizzle: { models: ["select"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares blob $type array overrides with manual row mirrors",
+			code: `
+				import { blob, sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const files = sqliteTable("files", {
+					id: text("id").primaryKey(),
+					attachments: blob("attachments").$type<Foo[]>().notNull(),
+				});
+				type FileRow = { attachments: Foo[]; id: string };
+			`,
+			options: [{ drizzle: { models: ["select"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares real columns with number row fields",
+			code: `
+				import { real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const readings = sqliteTable("readings", {
+					id: text("id").primaryKey(),
+					value: real("value").notNull(),
+				});
+				type Reading = { id: string; value: number };
+			`,
+			options: [{ drizzle: { models: ["select"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares SQLite boolean-mode integer columns with boolean row fields",
+			code: `
+				import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const settings = sqliteTable("settings", {
+					id: text("id").primaryKey(),
+					enabled: integer("enabled", { mode: "boolean" }).notNull(),
+				});
+				type Setting = { enabled: boolean; id: string };
+			`,
+			options: [{ drizzle: { models: ["select"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares schema-qualified Postgres table models with manual row mirrors",
+			code: `
+				import { pgSchema, text } from "drizzle-orm/pg-core";
+				const auth = pgSchema("auth");
+				const users = auth.table("users", {
+					id: text("id").primaryKey(),
+					name: text("name").notNull(),
+				});
+				type User = { id: string; name: string };
+			`,
+			options: [{ drizzle: { models: ["select"] } }],
 			errors: [{ messageId: "duplicate" }],
 		},
 	],

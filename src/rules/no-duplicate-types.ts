@@ -24,6 +24,11 @@ interface SeenType {
 	filename: string;
 }
 
+interface DrizzleBuilder {
+	name: string;
+	type: string;
+}
+
 const ignoredZodMethods = new Set([
 	"min", "max", "length", "nonempty", "email", "url", "uuid", "guid", "cuid", "cuid2", "ulid", "xid", "ksuid",
 	"nanoid", "regex", "includes", "startsWith", "endsWith", "datetime", "date", "time", "duration", "ip", "cidr",
@@ -120,10 +125,10 @@ function canonicalDeclaration(node: TypeDeclaration): string | null {
 	return canonicalMembers(node.body.body, parameters);
 }
 
-function memberCall(node: ESTree.Expression): { name: string; object: ESTree.Expression; arguments_: ESTree.Expression[] } | null {
+function memberCall(node: ESTree.Expression): { name: string; object: ESTree.Expression; arguments_: ESTree.Expression[]; typeArguments: ESTree.TSTypeParameterInstantiation | null } | null {
 	if (node.type !== "CallExpression" || node.callee.type !== "MemberExpression" || node.callee.computed || node.callee.property.type !== "Identifier") return null;
 	if (node.arguments.some((argument) => argument.type === "SpreadElement")) return null;
-	return { name: node.callee.property.name, object: node.callee.object, arguments_: node.arguments as ESTree.Expression[] };
+	return { name: node.callee.property.name, object: node.callee.object, arguments_: node.arguments as ESTree.Expression[], typeArguments: node.typeArguments ?? null };
 }
 
 function factoryCall(node: ESTree.Expression, namespaces: Set<string>, functions: Map<string, string>): { name: string; arguments_: ESTree.Expression[] } | null {
@@ -335,27 +340,49 @@ function canonicalArkObject(node: ESTree.Expression): { fingerprint: string; pro
 	return { fingerprint: `{${members.join(",")}}`, properties: members.length };
 }
 
-function canonicalDrizzleColumn(node: ESTree.Expression, builders: Map<string, string>): { type: string; notNull: boolean; hasDefault: boolean } | null {
+function canonicalDrizzleIntegerType(node: ESTree.CallExpression, builder: DrizzleBuilder): string | null {
+	if (builder.name !== "integer" || node.arguments.length === 1) return builder.type;
+	if (node.arguments.length !== 2 || node.arguments[1].type !== "ObjectExpression") return null;
+	let mode: string | null = null;
+	for (const property of node.arguments[1].properties) {
+		if (property.type !== "Property" || property.computed || property.kind !== "init" || propertyKey(property.key) !== "mode" || property.value.type !== "Literal" || typeof property.value.value !== "string") return null;
+		mode = property.value.value;
+	}
+	return mode === null ? builder.type : mode === "boolean" ? "TSBooleanKeyword" : null;
+}
+
+function canonicalDrizzleColumn(node: ESTree.Expression, builders: Map<string, DrizzleBuilder>): { type: string; notNull: boolean; hasDefault: boolean } | null {
 	let current = node;
 	let notNull = false;
 	let hasDefault = false;
+	let typeOverride: string | null = null;
 	while (true) {
 		const call = memberCall(current);
 		if (call === null) break;
-		if ((call.name === "notNull" || call.name === "primaryKey") && call.arguments_.length === 0) notNull = true;
+		if (call.name === "notNull" && call.arguments_.length === 0) notNull = true;
+		else if (call.name === "primaryKey") notNull = true;
+		else if (call.name === "$type" && call.arguments_.length === 0 && call.typeArguments !== null && call.typeArguments.params.length === 1 && typeOverride === null) {
+			typeOverride = canonicalType(call.typeArguments.params[0], new Map());
+			if (typeOverride === null) return null;
+		}
 		else if (["default", "defaultNow", "defaultRandom", "$default", "$defaultFn"].includes(call.name)) hasDefault = true;
 		else if (!["primaryKey", "unique", "references", "onUpdate", "$onUpdate", "$onUpdateFn"].includes(call.name)) return null;
 		current = call.object;
 	}
 	if (current.type !== "CallExpression" || current.callee.type !== "Identifier") return null;
-	const type = builders.get(current.callee.name);
-	if (type === undefined) return null;
-	if (current.callee.name === "serial") hasDefault = true;
+	const builder = builders.get(current.callee.name);
+	if (builder === undefined) return null;
+	const type = typeOverride ?? canonicalDrizzleIntegerType(current, builder);
+	if (type === null) return null;
+	if (builder.name === "serial") hasDefault = true;
 	return { type, notNull, hasDefault };
 }
 
-function canonicalDrizzleTable(node: ESTree.Expression, tableFactories: Set<string>, builders: Map<string, string>, model: "select" | "insert"): { fingerprint: string; properties: number } | null {
-	if (node.type !== "CallExpression" || node.callee.type !== "Identifier" || !tableFactories.has(node.callee.name) || node.arguments.length < 2 || node.arguments[1].type === "SpreadElement") return null;
+function canonicalDrizzleTable(node: ESTree.Expression, tableFactories: Set<string>, schemaObjects: Set<string>, builders: Map<string, DrizzleBuilder>, model: "select" | "insert"): { fingerprint: string; properties: number } | null {
+	if (node.type !== "CallExpression" || node.arguments.length < 2 || node.arguments[1].type === "SpreadElement") return null;
+	const directTable = node.callee.type === "Identifier" && tableFactories.has(node.callee.name);
+	const schemaTable = node.callee.type === "MemberExpression" && !node.callee.computed && node.callee.object.type === "Identifier" && schemaObjects.has(node.callee.object.name) && node.callee.property.type === "Identifier" && node.callee.property.name === "table";
+	if (!directTable && !schemaTable) return null;
 	const columns = node.arguments[1];
 	if (columns.type !== "ObjectExpression") return null;
 	const members: string[] = [];
@@ -414,7 +441,11 @@ export const noDuplicateTypesRule = defineRule({
 		const arkTypeFunctions = new Set<string>();
 		let hasArkTypeImport = false;
 		const drizzleTables = new Set<string>();
-		const drizzleBuilders = new Map<string, string>();
+		const drizzleSchemaFactories = new Set<string>();
+		const drizzleSchemaObjects = new Set<string>();
+		const drizzleBuilders = new Map<string, DrizzleBuilder>();
+		const drizzleModels = new Map<string, Map<"select" | "insert", string>>();
+		const drizzleAliases: ESTree.TSTypeAliasDeclaration[] = [];
 		const inspectSchema = (node: ESTree.VariableDeclarator) => {
 			if (options.schemas?.libraries?.includes("zod") !== true || node.id.type !== "Identifier" || node.init === null) return;
 			const call = memberCall(node.init);
@@ -440,10 +471,28 @@ export const noDuplicateTypesRule = defineRule({
 		};
 		const inspectDrizzle = (node: ESTree.VariableDeclarator) => {
 			if (options.drizzle === undefined || node.id.type !== "Identifier" || node.init === null) return;
+			const models = new Map<"select" | "insert", string>();
 			for (const model of options.drizzle.models ?? ["select", "insert"]) {
-				const table = canonicalDrizzleTable(node.init, drizzleTables, drizzleBuilders, model);
-				if (table !== null && table.properties >= (options.minProperties ?? 2)) report(node, node.id.name, table.fingerprint, `drizzle-${model}`);
+				const table = canonicalDrizzleTable(node.init, drizzleTables, drizzleSchemaObjects, drizzleBuilders, model);
+				if (table === null || table.properties < (options.minProperties ?? 2)) continue;
+				models.set(model, table.fingerprint);
+				report(node, node.id.name, table.fingerprint, `drizzle-${model}`);
 			}
+			if (models.size > 0) drizzleModels.set(node.id.name, models);
+		};
+		const inspectDrizzleSchema = (node: ESTree.VariableDeclarator) => {
+			if (node.id.type !== "Identifier" || node.init === null || node.init.type !== "CallExpression" || node.init.callee.type !== "Identifier" || !drizzleSchemaFactories.has(node.init.callee.name)) return;
+			drizzleSchemaObjects.add(node.id.name);
+		};
+		const inspectDrizzleAlias = (node: ESTree.TSTypeAliasDeclaration) => {
+			if (options.drizzle === undefined || node.typeAnnotation.type !== "TSTypeQuery" || node.typeAnnotation.typeArguments !== null) return;
+			const name = canonicalTypeName(node.typeAnnotation.exprName as ESTree.TSTypeName);
+			if (name === null) return;
+			const match = /^(.*)\.\$infer(Select|Insert)$/.exec(name);
+			if (match === null) return;
+			const model = match[2] === "Select" ? "select" : "insert";
+			const fingerprint = drizzleModels.get(match[1])?.get(model);
+			if (fingerprint !== undefined) report(node, node.id.name, fingerprint, `drizzle-${model}`);
 		};
 		return {
 			Program() { options = (context.options[0] as RuleOptions | undefined) ?? {}; },
@@ -467,23 +516,34 @@ export const noDuplicateTypesRule = defineRule({
 					if (typeof imported?.name === "string" && imported.name === "type") arkTypeFunctions.add(specifier.local.name);
 				}
 				}
-				if (/^drizzle-orm\/(pg|mysql|sqlite)-core$/.test(String(node.source.value))) {
+				const drizzleSource = /^drizzle-orm\/(pg|mysql|sqlite)-core$/.exec(String(node.source.value));
+				if (drizzleSource !== null) {
+					const dialect = drizzleSource[1];
 					for (const specifier of node.specifiers) {
 						if (specifier.type !== "ImportSpecifier" || specifier.imported.type !== "Identifier") continue;
 						if (["pgTable", "mysqlTable", "sqliteTable"].includes(specifier.imported.name)) drizzleTables.add(specifier.local.name);
-						const types: Record<string, string> = { text: "TSStringKeyword", varchar: "TSStringKeyword", uuid: "TSStringKeyword", char: "TSStringKeyword", integer: "TSNumberKeyword", int: "TSNumberKeyword", serial: "TSNumberKeyword", smallint: "TSNumberKeyword", boolean: "TSBooleanKeyword" };
+						if (specifier.imported.name === "pgSchema") drizzleSchemaFactories.add(specifier.local.name);
+						const types: Record<string, string> = { text: "TSStringKeyword", varchar: "TSStringKeyword", uuid: "TSStringKeyword", char: "TSStringKeyword", integer: "TSNumberKeyword", int: "TSNumberKeyword", serial: "TSNumberKeyword", smallint: "TSNumberKeyword", real: "TSNumberKeyword", float: "TSNumberKeyword", doublePrecision: "TSNumberKeyword", boolean: "TSBooleanKeyword" };
+						if (dialect === "sqlite") types.blob = "ref(Uint8Array<>)";
 						const type = types[specifier.imported.name];
-						if (type !== undefined) drizzleBuilders.set(specifier.local.name, type);
+						if (type !== undefined) drizzleBuilders.set(specifier.local.name, { name: specifier.imported.name, type });
 					}
 				}
 			},
-			TSTypeAliasDeclaration: inspect,
+			TSTypeAliasDeclaration(node) {
+				inspect(node);
+				drizzleAliases.push(node);
+			},
 			TSInterfaceDeclaration: inspect,
 			VariableDeclarator(node) {
 				inspectSchema(node);
 				inspectValibot(node);
 				inspectArkType(node);
+				inspectDrizzleSchema(node);
 				inspectDrizzle(node);
+			},
+			"Program:exit"() {
+				for (const node of drizzleAliases) inspectDrizzleAlias(node);
 			},
 		};
 	},
