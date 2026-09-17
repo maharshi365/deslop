@@ -2,16 +2,28 @@ import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
 
 type TypeDeclaration = ESTree.TSTypeAliasDeclaration | ESTree.TSInterfaceDeclaration;
+type ReportNode = TypeDeclaration | ESTree.VariableDeclarator;
 
 interface RuleOptions {
 	message?: string;
 	minProperties?: number;
+	schemas?: {
+		libraries?: string[];
+		matchTypes?: boolean;
+	};
 }
 
 interface SeenType {
 	name: string;
 	filename: string;
 }
+
+const ignoredZodMethods = new Set([
+	"min", "max", "length", "nonempty", "email", "url", "uuid", "guid", "cuid", "cuid2", "ulid", "xid", "ksuid",
+	"nanoid", "regex", "includes", "startsWith", "endsWith", "datetime", "date", "time", "duration", "ip", "cidr",
+	"emoji", "base64", "base64url", "jwt", "int", "safe", "finite", "multipleOf", "step", "positive", "negative",
+	"nonpositive", "nonnegative", "gt", "gte", "lt", "lte", "describe", "brand", "readonly", "default",
+]);
 
 function propertyKey(node: unknown): string | null {
 	const value = node as { type?: unknown; name?: unknown; value?: unknown };
@@ -102,21 +114,124 @@ function canonicalDeclaration(node: TypeDeclaration): string | null {
 	return canonicalMembers(node.body.body, parameters);
 }
 
+function memberCall(node: ESTree.Expression): { name: string; object: ESTree.Expression; arguments_: ESTree.Expression[] } | null {
+	if (node.type !== "CallExpression" || node.callee.type !== "MemberExpression" || node.callee.computed || node.callee.property.type !== "Identifier") return null;
+	if (node.arguments.some((argument) => argument.type === "SpreadElement")) return null;
+	return { name: node.callee.property.name, object: node.callee.object, arguments_: node.arguments as ESTree.Expression[] };
+}
+
+function schemaLiteral(node: ESTree.Expression): string | null {
+	if (node.type !== "Literal") return null;
+	if (typeof node.value === "string") return JSON.stringify(node.value);
+	if (typeof node.value === "number" || typeof node.value === "boolean") return String(node.value);
+	if (typeof node.value === "bigint") return `${node.value}n`;
+	return null;
+}
+
+function canonicalSchemaProperty(node: ESTree.Expression, zodNamespaces: Set<string>): { type: string; optional: boolean } | null {
+	let current = node;
+	let optional = false;
+	let nullable = false;
+	while (true) {
+		const call = memberCall(current);
+		if (call === null || !(["optional", "nullish"].includes(call.name) && call.arguments_.length === 0 || ignoredZodMethods.has(call.name))) break;
+		if (call.name === "optional") optional = true;
+		if (call.name === "nullish") {
+			optional = true;
+			nullable = true;
+		}
+		current = call.object;
+	}
+	const type = canonicalSchema(current, zodNamespaces);
+	return type === null ? null : { type: nullable ? `union(${["TSNullKeyword", type].sort().join(",")})` : type, optional };
+}
+
+function canonicalSchemaObject(node: ESTree.Expression, zodNamespaces: Set<string>): { fingerprint: string; properties: number } | null {
+	if (node.type !== "ObjectExpression") return null;
+	const members: string[] = [];
+	for (const property of node.properties) {
+		if (property.type !== "Property" || property.computed || property.kind !== "init") return null;
+		const key = propertyKey(property.key);
+		if (key === null) return null;
+		const value = canonicalSchemaProperty(property.value, zodNamespaces);
+		if (value === null) return null;
+		members.push(`prop(${key},${value.optional ? "?" : "!"},rw,${value.type})`);
+	}
+	members.sort();
+	return { fingerprint: `{${members.join(",")}}`, properties: members.length };
+}
+
+function canonicalSchema(node: ESTree.Expression, zodNamespaces: Set<string>): string | null {
+	const call = memberCall(node);
+	if (call === null) return null;
+	if (call.object.type === "Identifier" && zodNamespaces.has(call.object.name)) {
+		switch (call.name) {
+			case "string": return call.arguments_.length === 0 ? "TSStringKeyword" : null;
+			case "number": return call.arguments_.length === 0 ? "TSNumberKeyword" : null;
+			case "boolean": return call.arguments_.length === 0 ? "TSBooleanKeyword" : null;
+			case "bigint": return call.arguments_.length === 0 ? "TSBigIntKeyword" : null;
+			case "unknown": return call.arguments_.length === 0 ? "TSUnknownKeyword" : null;
+			case "any": return call.arguments_.length === 0 ? "TSAnyKeyword" : null;
+			case "never": return call.arguments_.length === 0 ? "TSNeverKeyword" : null;
+			case "null": return call.arguments_.length === 0 ? "TSNullKeyword" : null;
+			case "undefined": return call.arguments_.length === 0 ? "TSUndefinedKeyword" : null;
+			case "void": return call.arguments_.length === 0 ? "TSVoidKeyword" : null;
+			case "literal": {
+				if (call.arguments_.length !== 1) return null;
+				const value = schemaLiteral(call.arguments_[0]);
+				return value === null ? null : `literal(${value})`;
+			}
+			case "enum": {
+				if (call.arguments_.length !== 1 || call.arguments_[0].type !== "ArrayExpression") return null;
+				const values = call.arguments_[0].elements.map((element) => element === null || element.type === "SpreadElement" ? null : schemaLiteral(element));
+				if (values.some((value) => value === null)) return null;
+				return `union(${[...new Set(values)].sort().join(",")})`;
+			}
+			case "object": {
+				if (call.arguments_.length !== 1) return null;
+				return canonicalSchemaObject(call.arguments_[0], zodNamespaces)?.fingerprint ?? null;
+			}
+			case "array": {
+				if (call.arguments_.length !== 1) return null;
+				const element = canonicalSchema(call.arguments_[0], zodNamespaces);
+				return element === null ? null : `array(${element})`;
+			}
+			case "union": {
+				if (call.arguments_.length !== 1 || call.arguments_[0].type !== "ArrayExpression") return null;
+				const types = call.arguments_[0].elements.map((element) => element === null || element.type === "SpreadElement" ? null : canonicalSchema(element, zodNamespaces));
+				if (types.some((type) => type === null)) return null;
+				return `union(${[...new Set(types)].sort().join(",")})`;
+			}
+			default: return null;
+		}
+	}
+	const inner = canonicalSchema(call.object, zodNamespaces);
+	if (inner === null) return null;
+	switch (call.name) {
+		case "optional": return `union(${["TSUndefinedKeyword", inner].sort().join(",")})`;
+		case "nullable": return `union(${["TSNullKeyword", inner].sort().join(",")})`;
+		case "nullish": return `union(${["TSNullKeyword", "TSUndefinedKeyword", inner].sort().join(",")})`;
+		case "array": return call.arguments_.length === 0 ? `array(${inner})` : null;
+		default: return ignoredZodMethods.has(call.name) ? inner : null;
+	}
+}
+
 /** Report exact structural duplicates without TypeScript assignability or fuzzy matching. */
 export const noDuplicateTypesRule = defineRule({
 	meta: {
 		type: "suggestion",
 		docs: { description: "Report structurally identical TypeScript declarations" },
 		messages: { duplicate: "{{message}} First seen as {{firstName}} in {{firstFile}}." },
-		schema: [{ type: "object", properties: { message: { type: "string" }, minProperties: { type: "integer", minimum: 0 } }, additionalProperties: false }],
+		schema: [{ type: "object", properties: { message: { type: "string" }, minProperties: { type: "integer", minimum: 0 }, schemas: { type: "object", properties: { libraries: { type: "array", items: { enum: ["zod"] } }, matchTypes: { type: "boolean" } }, additionalProperties: false } }, additionalProperties: false }],
 	},
 	createOnce(context) {
 		const seen = new Map<string, SeenType>();
 		let options: RuleOptions = {};
-		const report = (node: TypeDeclaration, fingerprint: string) => {
-			const first = seen.get(fingerprint);
+		const report = (node: ReportNode, name: string, fingerprint: string, kind: "type" | "schema") => {
+			const key = options.schemas?.matchTypes === false ? `${kind}:${fingerprint}` : fingerprint;
+			const first = seen.get(key);
 			if (first === undefined) {
-				seen.set(fingerprint, { name: node.id.name, filename: context.filename });
+				seen.set(key, { name, filename: context.filename });
 				return;
 			}
 			context.report({ node, messageId: "duplicate", data: { message: options.message ?? "This type is structurally identical to an existing declaration.", firstName: first.name, firstFile: first.filename } });
@@ -132,12 +247,29 @@ export const noDuplicateTypesRule = defineRule({
 			const fingerprint = canonicalDeclaration(node);
 			if (fingerprint === null) return;
 			if (properties < (options.minProperties ?? 2)) return;
-			report(node, fingerprint);
+			report(node, node.id.name, fingerprint, "type");
+		};
+		const zodNamespaces = new Set<string>();
+		const inspectSchema = (node: ESTree.VariableDeclarator) => {
+			if (options.schemas?.libraries?.includes("zod") !== true || node.id.type !== "Identifier" || node.init === null) return;
+			const call = memberCall(node.init);
+			if (call === null || call.name !== "object" || call.arguments_.length !== 1 || call.object.type !== "Identifier" || !zodNamespaces.has(call.object.name)) return;
+			const schema = canonicalSchemaObject(call.arguments_[0], zodNamespaces);
+			if (schema === null || schema.properties < (options.minProperties ?? 2)) return;
+			report(node, node.id.name, schema.fingerprint, "schema");
 		};
 		return {
 			Program() { options = (context.options[0] as RuleOptions | undefined) ?? {}; },
+			ImportDeclaration(node) {
+				if (node.source.value !== "zod") return;
+				for (const specifier of node.specifiers) {
+					if (specifier.type === "ImportNamespaceSpecifier" || specifier.type === "ImportDefaultSpecifier") zodNamespaces.add(specifier.local.name);
+					if (specifier.type === "ImportSpecifier" && specifier.imported.type === "Identifier" && specifier.imported.name === "z") zodNamespaces.add(specifier.local.name);
+				}
+			},
 			TSTypeAliasDeclaration: inspect,
 			TSInterfaceDeclaration: inspect,
+			VariableDeclarator: inspectSchema,
 		};
 	},
 });
