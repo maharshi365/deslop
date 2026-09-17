@@ -120,6 +120,34 @@ Drizzle tables are not Standard Schema validators, but their declarations infer 
 
 The initial adapter supports direct imported `text`, `varchar`, `uuid`, `char`, `integer`, `int`, `serial`, `smallint`, and `boolean` columns. It accounts for `notNull`, primary keys, and supported default methods when determining nullability and insert optionality. Custom types, generated or identity columns, `$type`, dialect-specific modes, and unsupported builder chains are skipped rather than guessed.
 
+Direct imports are required so the adapter can identify table factories and column builders. Exact inferred models are reported, while intentionally smaller public projections are not:
+
+```ts
+import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  accessToken: text("access_token"),
+});
+
+// This is a projection, not a duplicate of the select or insert model.
+type PublicUser = { id: string; name: string };
+```
+
+Use a TypeScript assignment to verify compatibility with a shared contract, and an explicit mapper for projections:
+
+```ts
+type DbLocalModel = typeof localModels.$inferSelect;
+const contractCheck: LocalModel = {} as DbLocalModel;
+
+function toPublicUser(row: typeof users.$inferSelect): PublicUser {
+  return { id: row.id, name: row.name };
+}
+```
+
+If a nullable database field is exposed directly, the shared contract must include `null`.
+
 Dynamic schema construction, transforms, preprocessors, lazy schemas, referenced schema variables, records, tuples, intersections, discriminated unions, custom validators, and unrecognized library APIs are skipped. Standard Schema itself does not provide a portable structural schema AST, so additional Standard Schema-compatible validators require their own source adapter before they can be enabled in `schemas.libraries`.
 
 The rule has no fixer and does not use fuzzy matching, embeddings, or an LLM.

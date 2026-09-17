@@ -59,6 +59,37 @@ ruleTester.run("no-duplicate-types", noDuplicateTypesRule, {
 			`,
 			options: [{ schemas: { libraries: ["zod"], matchTypes: false } }],
 		},
+		{
+			name: "allows intentional Drizzle table projections",
+			code: `
+				import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const users = sqliteTable("users", {
+					id: text("id").primaryKey(),
+					name: text("name").notNull(),
+					accessToken: text("access_token"),
+				});
+				type PublicUser = { id: string; name: string };
+			`,
+			options: [{ drizzle: { models: ["select", "insert"] } }],
+		},
+		{
+			name: "allows compile-time Drizzle contract checks",
+			code: `
+				import type { LocalModel } from "@stitch/shared/models/types";
+				import type { localModels } from "@/db/schema/providers.js";
+				type DbLocalModel = typeof localModels.$inferSelect;
+				const contractCheck: LocalModel = {} as DbLocalModel;
+			`,
+			options: [{ drizzle: { models: ["select", "insert"] } }],
+		},
+		{
+			name: "allows nullable shared contracts",
+			code: `
+				type Message = { usage: Usage | null };
+				const message: Message = { usage: null };
+			`,
+			options: [{ drizzle: { models: ["select", "insert"] } }],
+		},
 	],
 	invalid: [
 		{
@@ -89,6 +120,16 @@ ruleTester.run("no-duplicate-types", noDuplicateTypesRule, {
 				import { z } from "zod";
 				const UserSchema = z.object({ id: z.string().uuid(), email: z.string().email().optional() });
 				interface Account { email?: string; id: string }
+			`,
+			options: [{ schemas: { libraries: ["zod"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares exact Zod schemas with TypeScript declarations",
+			code: `
+				import { z } from "zod";
+				const userSchema = z.object({ id: z.string(), name: z.string() });
+				type User = { id: string; name: string };
 			`,
 			options: [{ schemas: { libraries: ["zod"] } }],
 			errors: [{ messageId: "duplicate" }],
@@ -139,6 +180,32 @@ ruleTester.run("no-duplicate-types", noDuplicateTypesRule, {
 				import { pgTable, serial, text, integer } from "drizzle-orm/pg-core";
 				const users = pgTable("users", { id: serial("id").primaryKey(), name: text("name").notNull(), age: integer("age") });
 				interface NewUser { age?: number | null; id?: number; name: string }
+			`,
+			options: [{ drizzle: { models: ["insert"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares exact SQLite Drizzle select models with TypeScript declarations",
+			code: `
+				import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const users = sqliteTable("users", {
+					id: text("id").primaryKey(),
+					name: text("name").notNull(),
+				});
+				type User = { id: string; name: string };
+			`,
+			options: [{ drizzle: { models: ["select"] } }],
+			errors: [{ messageId: "duplicate" }],
+		},
+		{
+			name: "compares exact SQLite Drizzle insert models with TypeScript declarations",
+			code: `
+				import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+				const users = sqliteTable("users", {
+					id: text("id").primaryKey(),
+					name: text("name").notNull(),
+				});
+				type NewUser = { id: string; name: string };
 			`,
 			options: [{ drizzle: { models: ["insert"] } }],
 			errors: [{ messageId: "duplicate" }],
