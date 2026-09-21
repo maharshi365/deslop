@@ -1,5 +1,6 @@
+import type { Context, ESTree } from "@oxlint/plugins";
 import { RuleTester } from "oxlint/plugins-dev";
-import { describe, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { noDuplicateTypesRule } from "../src/rules/no-duplicate-types.ts";
 
@@ -8,6 +9,36 @@ RuleTester.it = it;
 
 const ruleTester = new RuleTester({
 	languageOptions: { parserOptions: { lang: "ts" } },
+});
+
+function typeAlias(name: string): ESTree.TSTypeAliasDeclaration {
+	return {
+		type: "TSTypeAliasDeclaration",
+		id: { type: "Identifier", name },
+		typeAnnotation: {
+			type: "TSTypeLiteral",
+			members: [
+				{ type: "TSPropertySignature", computed: false, key: { type: "Identifier", name: "id" }, optional: false, readonly: false, typeAnnotation: { typeAnnotation: { type: "TSStringKeyword" } } },
+				{ type: "TSPropertySignature", computed: false, key: { type: "Identifier", name: "email" }, optional: false, readonly: false, typeAnnotation: { typeAnnotation: { type: "TSStringKeyword" } } },
+			],
+		},
+	} as unknown as ESTree.TSTypeAliasDeclaration;
+}
+
+describe("no-duplicate-types LSP lifecycle", () => {
+	it("does not compare a file's current declarations with its previous lint run", () => {
+		const reports: unknown[] = [];
+		const context = { filename: "/repo/user.ts", options: [], report: (report: unknown) => reports.push(report) } as unknown as Context;
+		if (!("createOnce" in noDuplicateTypesRule)) throw new Error("Expected a createOnce rule");
+		const visitor = noDuplicateTypesRule.createOnce(context);
+
+		visitor.Program?.({} as ESTree.Program);
+		visitor.TSTypeAliasDeclaration?.(typeAlias("User"));
+		visitor.Program?.({} as ESTree.Program);
+		visitor.TSTypeAliasDeclaration?.(typeAlias("User"));
+
+		expect(reports).toEqual([]);
+	});
 });
 
 ruleTester.run("no-duplicate-types", noDuplicateTypesRule, {
