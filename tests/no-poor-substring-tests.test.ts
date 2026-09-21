@@ -247,6 +247,22 @@ ruleTester.run("no-poor-substring-tests", noPoorSubstringTestsRule, {
 			errors: [{ messageId: "poorSubstringTest" }],
 		},
 		{
+			name: "rejects search check on constant string inside expect",
+			code: `
+				const PROMPT = "You are an assistant.";
+				expect(PROMPT.search(/assistant/) !== -1).toBe(true);
+			`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
+		{
+			name: "rejects match check on constant string inside expect",
+			code: `
+				const PROMPT = "You are an assistant.";
+				expect(PROMPT.match(/assistant/)).toBeTruthy();
+			`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
+		{
 			name: "rejects regex.test on constant string inside expect",
 			code: `
 				const PROMPT = "You are an assistant.";
