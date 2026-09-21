@@ -18,6 +18,7 @@ import { noUnsafeDictionaryTypeRule } from "./rules/no-unsafe-dictionary-type.ts
 import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
 import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety-comment-for-type-assertion.ts";
 import { noCallOnlyAssertionsRule } from "./rules/no-call-only-assertions.ts";
+import { noPoorSubstringTestsRule } from "./rules/no-poor-substring-tests.ts";
 import { noPassThroughTypeAliasRule } from "./rules/no-pass-through-type-alias.ts";
 import { noDuplicateTypesRule } from "./rules/no-duplicate-types.ts";
 import { canonicalClassNames } from "./tailwind/rule.ts";
@@ -42,6 +43,7 @@ export const recommendedRules: Record<string, "error"> = {
 	"deslop/no-widen-then-assert": "error",
 	"deslop/require-safety-comment-for-type-assertion": "error",
 	"deslop/no-call-only-assertions": "error",
+	"deslop/no-poor-substring-tests": "error",
 	"deslop/no-pass-through-type-alias": "error",
 	"typescript/no-deprecated": "error",
 	"typescript/no-floating-promises": "error",
@@ -78,6 +80,8 @@ const deslopPlugin = eslintCompatPlugin({
 		"no-widen-then-assert": noWidenThenAssertRule,
 		"require-safety-comment-for-type-assertion": requireSafetyCommentForTypeAssertionRule,
 		"no-call-only-assertions": noCallOnlyAssertionsRule,
+		"no-poor-substring-tests": noPoorSubstringTestsRule,
+		"no-constant-substring-tests": noPoorSubstringTestsRule,
 		"no-pass-through-type-alias": noPassThroughTypeAliasRule,
 		"no-duplicate-types": noDuplicateTypesRule,
 		// Opt-in: NOT in `recommendedRules`. Requires a `cssPath` option, so users add it manually.
