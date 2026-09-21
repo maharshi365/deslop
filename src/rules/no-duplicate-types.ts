@@ -88,6 +88,8 @@ export const noDuplicateTypesRule = defineRule({
 		};
 		return {
 			Program() {
+				// LSPs can re-lint a file in the same createOnce worker; discard its stale declarations first.
+				for (const [key, type] of seen) if (type.filename === context.filename) seen.delete(key);
 				options = (context.options[0] as RuleOptions | undefined) ?? {};
 				zodNamespaces.clear(); valibotNamespaces.clear(); arkTypeFunctions.clear(); valibotFunctions.clear();
 				drizzleTables.clear(); drizzleSchemaFactories.clear(); drizzleSchemaObjects.clear(); drizzleBuilders.clear(); drizzleModels.clear(); drizzleAliases.length = 0;
