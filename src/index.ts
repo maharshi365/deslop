@@ -47,7 +47,9 @@ export const recommendedRules: Record<string, "error"> = {
 	"deslop/no-poor-substring-tests": "error",
 	"deslop/no-pass-through-type-alias": "error",
 	"typescript/no-deprecated": "error",
+	"typescript/no-require-imports": "error",
 	"typescript/no-floating-promises": "error",
+	"no-unreachable": "error",
 };
 
 /** ESLint flat-config style configs. `recommended` enables every recommended `deslop/*` rule as `"error"` (excluding opt-in rules), plus standard `typescript/*` rules. The `typescript/*` rules require type-aware linting (`options.typeAware`), so `recommended` sets it. */
