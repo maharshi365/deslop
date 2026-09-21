@@ -51,6 +51,11 @@ const ASSERT_MATCHERS = new Set([
 
 const fileContentCache = new Map<string, string>();
 
+function isTestFile(filename?: string): boolean {
+	if (!filename) return false;
+	return /(?:^|[/\\])(?:__tests__|tests?)(?:[/\\]|$)|(?:[._](?:test|spec))\.[cm]?[jt]sx?$/i.test(filename);
+}
+
 function rootIdentifierName(node: ESTree.Expression): string | undefined {
 	let current: ESTree.Expression = node;
 	while (true) {
@@ -292,8 +297,15 @@ export const noPoorSubstringTestsRule = defineRule({
 		schema: [],
 	},
 	createOnce(context) {
+		let shouldCheck = false;
+
 		return {
+			Program() {
+				shouldCheck = isTestFile(context.filename);
+			},
 			CallExpression(node) {
+				if (!shouldCheck) return;
+
 				// Pattern 1: expect(subject).toContain(sub), expect(subject).toMatch(regex), etc.
 				if (
 					node.callee.type === "MemberExpression" &&

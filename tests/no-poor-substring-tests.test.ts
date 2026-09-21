@@ -6,6 +6,7 @@ import { describe, it } from "vitest";
 import { noPoorSubstringTestsRule } from "../src/rules/no-poor-substring-tests.ts";
 
 const fixtureTestFile = fileURLToPath(new URL("./fixtures/test.ts", import.meta.url));
+const testFile = "/repo/prompt.test.ts";
 
 RuleTester.describe = describe;
 RuleTester.it = it;
@@ -16,6 +17,14 @@ const ruleTester = new RuleTester({
 
 ruleTester.run("no-poor-substring-tests", noPoorSubstringTestsRule, {
 	valid: [
+		{
+			name: "allows application code outside a test file",
+			filename: "/repo/src/prompt.ts",
+			code: `
+				const PROMPT = "You are a helpful assistant.";
+				expect(PROMPT).toContain("assistant");
+			`,
+		},
 		{
 			name: "allows checking substrings on dynamic function results",
 			code: `
@@ -129,6 +138,17 @@ ruleTester.run("no-poor-substring-tests", noPoorSubstringTestsRule, {
 		{
 			name: "rejects toContain on direct string literal",
 			code: `expect("The quick brown fox").toContain("brown");`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
+		{
+			name: "rejects Bun toInclude on a constant string",
+			code: `
+				import { expect, test } from "bun:test";
+				const PROMPT = "You are a helpful assistant.";
+				test("has assistant", () => {
+					expect(PROMPT).toInclude("assistant");
+				});
+			`,
 			errors: [{ messageId: "poorSubstringTest" }],
 		},
 		{
@@ -336,5 +356,5 @@ ruleTester.run("no-poor-substring-tests", noPoorSubstringTestsRule, {
 			`,
 			errors: [{ messageId: "poorSubstringTest" }],
 		},
-	],
+	].map((test) => ({ filename: testFile, ...test })),
 });
