@@ -59,7 +59,7 @@ The recommended config enables type-aware linting for `typescript/no-deprecated`
 | Standard rule | Status | Description |
 | --- | --- | --- |
 | `typescript/no-deprecated` | Recommended | Disallows using code marked `@deprecated`. Requires type-aware linting. |
-| `typescript/no-dynamic-import` | Recommended | Disallows dynamic `import()` expressions. |
+| `typescript/no-require-imports` | Recommended | Disallows CommonJS `require()` imports. |
 | `typescript/no-floating-promises` | Recommended | Disallows floating promises. Requires type-aware linting. |
 | `no-unreachable` | Recommended | Disallows unreachable code. |
 

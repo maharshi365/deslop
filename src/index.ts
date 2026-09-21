@@ -47,7 +47,7 @@ export const recommendedRules: Record<string, "error"> = {
 	"deslop/no-poor-substring-tests": "error",
 	"deslop/no-pass-through-type-alias": "error",
 	"typescript/no-deprecated": "error",
-	"typescript/no-dynamic-import": "error",
+	"typescript/no-require-imports": "error",
 	"typescript/no-floating-promises": "error",
 	"no-unreachable": "error",
 };
