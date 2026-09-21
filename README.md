@@ -51,6 +51,7 @@ The recommended config enables type-aware linting for `typescript/no-deprecated`
 | `require-safety-comment-for-type-assertion` | Recommended | Requires an invariant justification for non-const assertions. |
 | `no-call-only-assertions` | Recommended | Flags tests whose assertions only check mock calls. |
 | `no-pass-through-type-alias` | Recommended | Disallows aliases that only rename another type. |
+| `no-duplicate-consts` | Opt-in | Reports all-caps constants with the same static value in different files. |
 | [`no-duplicate-types`](docs/no-duplicate-types.md) | Opt-in | Reports exact duplicate object contracts. No fixer. |
 | [`canonical-class-names`](docs/tailwind.md) | Opt-in | Fixes non-canonical Tailwind CSS v4 class spellings. |
 

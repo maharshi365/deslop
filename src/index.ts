@@ -20,6 +20,7 @@ import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety
 import { noCallOnlyAssertionsRule } from "./rules/no-call-only-assertions.ts";
 import { noPassThroughTypeAliasRule } from "./rules/no-pass-through-type-alias.ts";
 import { noDuplicateTypesRule } from "./rules/no-duplicate-types.ts";
+import { noDuplicateConstsRule } from "./rules/no-duplicate-consts.ts";
 import { canonicalClassNames } from "./tailwind/rule.ts";
 
 /** Every `deslop/*` rule, plus selected standard rules, each set to `"error"`. Spread into the `rules` field of an oxlint config. */
@@ -80,6 +81,7 @@ const deslopPlugin = eslintCompatPlugin({
 		"no-call-only-assertions": noCallOnlyAssertionsRule,
 		"no-pass-through-type-alias": noPassThroughTypeAliasRule,
 		"no-duplicate-types": noDuplicateTypesRule,
+		"no-duplicate-consts": noDuplicateConstsRule,
 		// Opt-in: NOT in `recommendedRules`. Requires a `cssPath` option, so users add it manually.
 		"canonical-class-names": canonicalClassNames,
 	},
