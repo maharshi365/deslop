@@ -30,31 +30,50 @@ The recommended config enables type-aware linting for `typescript/no-deprecated`
 
 ## Rules
 
+### Type safety and evidence
+
 | Rule | Status | Description |
 | --- | --- | --- |
-| `no-array-filter-map` | Recommended | Rejects adjacent eager array filter/map passes; allows lazy iterator pipelines. |
-| `no-reduce-accumulator-copy` | Recommended | Rejects non-spread accumulator copies inside reducers. Enable native `oxc/no-accumulating-spread` alongside it. |
 | `no-chained-type-assertions` | Recommended | Rejects nested `as` / angle-bracket assertions that fabricate evidence. |
 | `no-conditional-empty-object-spread` | Recommended | Reports object spreads using a conditional `{}` branch to omit fields. |
 | `no-known-value-widening` | Recommended | Rejects known expressions flowing into explicit `unknown`, `object`, or open dictionaries. |
-| `no-module-mocking` | Recommended | Rejects Vitest and Jest module mocks. |
 | `no-object-parameters` | Recommended | Rejects `object` on function inputs. |
-| `no-reflect-apply` | Recommended | Rejects global `Reflect.apply`. |
-| `no-reflect-get` | Recommended | Rejects global `Reflect.get`. |
 | `no-runtime-typeof` | Recommended | Requires boundary parsing instead of ad hoc `typeof` narrowing. |
-| `no-shape-in-symbol-names` | Recommended | Rejects `shape` in locally owned symbol names. |
 | `no-unknown-parameters` | Recommended | Rejects `unknown` on function inputs. |
 | `no-unknown-returns` | Recommended | Rejects return contracts resolving to `unknown`. |
 | `no-unknown-type-aliases` | Recommended | Rejects aliases whose resolved type is `unknown`. |
 | `no-unsafe-dictionary-type` | Recommended | Rejects dictionary values based on unsafe escape hatches. |
 | `no-widen-then-assert` | Recommended | Rejects widening known evidence before narrowing assertions. |
 | `require-safety-comment-for-type-assertion` | Recommended | Requires an invariant justification for non-const assertions. |
-| `no-call-only-assertions` | Recommended | Flags tests whose assertions only check mock calls. |
-| `no-poor-substring-tests` | Recommended | Rejects testing that a constant string contains substrings. |
 | `no-pass-through-type-alias` | Recommended | Disallows aliases that only rename another type. |
+
+### Code quality and APIs
+
+| Rule | Status | Description |
+| --- | --- | --- |
+| `no-array-filter-map` | Recommended | Rejects adjacent eager array filter/map passes; allows lazy iterator pipelines. |
+| `no-reduce-accumulator-copy` | Recommended | Rejects non-spread accumulator copies inside reducers. Enable native `oxc/no-accumulating-spread` alongside it. |
+| `no-reflect-apply` | Recommended | Rejects global `Reflect.apply`. |
+| `no-reflect-get` | Recommended | Rejects global `Reflect.get`. |
+| `no-shape-in-symbol-names` | Recommended | Rejects `shape` in locally owned symbol names. |
+
+### Tests
+
+| Rule | Status | Description |
+| --- | --- | --- |
+| `no-call-only-assertions` | Recommended | Flags tests whose assertions only check mock calls. |
+| `no-module-mocking` | Recommended | Rejects Vitest and Jest module mocks. |
+| `no-poor-substring-tests` | Recommended | Rejects testing that a constant string contains substrings. |
+
+### Opt-in rules
+
+| Rule | Status | Description |
+| --- | --- | --- |
 | [`no-duplicate-consts`](docs/no-duplicate-consts.md) | Opt-in | Reports all-caps constants with the same static value in different files. |
 | [`no-duplicate-types`](docs/no-duplicate-types.md) | Opt-in | Reports exact duplicate object contracts. No fixer. |
 | [`canonical-class-names`](docs/tailwind.md) | Opt-in | Fixes non-canonical Tailwind CSS v4 class spellings. |
+
+### Standard rules enabled by the recommended config
 
 | Standard rule | Status | Description |
 | --- | --- | --- |
