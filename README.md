@@ -26,8 +26,6 @@ export default defineConfig({
 });
 ```
 
-The recommended config enables type-aware linting for `typescript/no-deprecated` and `typescript/no-floating-promises`. Install `oxlint-tsgolint` when using it.
-
 ## Rules
 
 ### Type safety and evidence
@@ -80,6 +78,7 @@ The recommended config enables type-aware linting for `typescript/no-deprecated`
 | `typescript/no-deprecated` | Recommended | Disallows using code marked `@deprecated`. Requires type-aware linting. |
 | `typescript/no-require-imports` | Recommended | Disallows CommonJS `require()` imports. |
 | `typescript/no-floating-promises` | Recommended | Disallows floating promises. Requires type-aware linting. |
+| `typescript/no-unnecessary-condition` | Recommended | Disallows always truthy/falsy/nullish conditions. Requires type-aware linting. |
 | `no-unreachable` | Recommended | Disallows unreachable code. |
 
 ## Guides

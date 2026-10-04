@@ -49,6 +49,7 @@ export const recommendedRules: Record<string, "error"> = {
 	"typescript/no-deprecated": "error",
 	"typescript/no-require-imports": "error",
 	"typescript/no-floating-promises": "error",
+	"typescript/no-unnecessary-condition": "error",
 	"no-unreachable": "error",
 };
 
