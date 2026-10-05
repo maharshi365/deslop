@@ -69,6 +69,7 @@ export default defineConfig({
 | --- | --- | --- |
 | [`no-duplicate-consts`](docs/no-duplicate-consts.md) | Opt-in | Reports all-caps constants with the same static value in different files. |
 | [`no-duplicate-types`](docs/no-duplicate-types.md) | Opt-in | Reports exact duplicate object contracts. No fixer. |
+| [`no-renamed-imports`](docs/no-renamed-imports.md) | Opt-in | Fixes unnecessary named-import aliases when the original name has no module-level conflict. |
 | [`canonical-class-names`](docs/tailwind.md) | Opt-in | Fixes non-canonical Tailwind CSS v4 class spellings. |
 
 ### Standard rules enabled by the recommended config
@@ -87,6 +88,7 @@ export default defineConfig({
 | --- | --- |
 | [No duplicate consts](docs/no-duplicate-consts.md) | Configuration and exact static-value comparison behavior. |
 | [No duplicate types](docs/no-duplicate-types.md) | Exact comparison behavior, worker scope, complete TypeScript/JSON examples, and every supported option. |
+| [No renamed imports](docs/no-renamed-imports.md) | When named-import aliases are fixed and how conflicts are handled. |
 | [Tailwind canonical class names](docs/tailwind.md) | Tailwind v4 setup, complete TypeScript/JSON examples, and every supported option. |
 
 ## Credits
