@@ -67,6 +67,36 @@ cn("px-[16px]", active && "font-bold")
 
 It fixes individual class spellings only. It does not reorder or deduplicate classes. Template literals with interpolations and non-string helper arguments are skipped.
 
+## Performance Benchmark
+
+Run the root benchmark with:
+
+```bash
+npm run bench
+npm run bench -- --save baseline.json
+npm run bench -- --compare baseline.json
+npm run bench -- --varied --save varied-baseline.json
+npm run bench -- --varied --compare varied-baseline.json
+```
+
+The benchmark runs the real rule callbacks and Tailwind worker against 100,000 class strings across 1,000 simulated files. It includes canonical strings, arbitrary values that need fixes, and custom classes. The default case repeats four strings. `--varied` cycles through 512 combinations, with no repeated strings within a file. It checks the diagnostic count and reports the median of three fresh Node processes. It does not measure Oxlint parsing or total CLI startup time. Compare results from the same scenario.
+
+`coldMs` includes worker startup, CSS loading, and the first class check. `warmMs` measures the remaining workload. `totalMs` includes both. Results depend on the machine and the amount of class reuse.
+
+Canonical results are cached by CSS entry and root font size. Reloading the entry CSS clears them. Repeated string rewrites are cached within each file, but each occurrence still gets its own diagnostic and fix. Tailwind's initial canonicalization index can still be expensive; these caches do not remove that cold-start cost.
+
+Local measurements on Windows with Node 22.21.1 and Tailwind 4.3.3:
+
+| Scenario / change | Cold | Warm | Total | Total speedup |
+| --- | ---: | ---: | ---: | ---: |
+| Repeated: original | 1,663 ms | 3,128 ms | 4,791 ms | — |
+| Repeated: token cache | 1,543 ms | 156 ms | 1,699 ms | 2.82× |
+| Repeated: token + string caches | 1,558 ms | 47 ms | 1,605 ms | 2.98× |
+| Varied: original | 1,581 ms | 2,897 ms | 4,459 ms | — |
+| Varied: token + string caches | 1,585 ms | 199 ms | 1,783 ms | 2.50× |
+
+Each column is a separate median, so cold and warm values may not sum to the total. These are synthetic rule workloads, not a guarantee of total-project lint speed.
+
 ## Custom Names
 
 Providing `attributes` or `calleeFunctions` replaces that option's defaults. Include the defaults explicitly if you want to add names without losing built-in coverage:

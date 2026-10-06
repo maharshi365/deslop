@@ -48,6 +48,7 @@ export const canonicalClassNames = defineRule({
 		let rem = DEFAULT_ROOT_FONT_SIZE;
 		let cssFile = "";
 		let designKey: string | false | null = null;
+		const checkedValues = new Map<string, ReturnType<typeof rewriteClassValue>>();
 
 		function initFile() {
 			const options = (context.options?.[0] ?? {}) as Partial<RuleOptions>;
@@ -60,6 +61,7 @@ export const canonicalClassNames = defineRule({
 				cssFile = options.cssPath ?? "";
 			}
 			designKey = null;
+			checkedValues.clear();
 		}
 
 		function getDesignKey(): string | null {
@@ -70,16 +72,21 @@ export const canonicalClassNames = defineRule({
 		}
 
 		function checkStringNode(node: StringNode, value: string) {
-			const tokens = uniqueTokens(value);
-			if (tokens.length === 0) return;
-			const key = getDesignKey();
-			if (key === null) {
-				context.report({ node, messageId: "cssNotFound", data: { path: cssFile } });
-				return;
+			let rewritten = checkedValues.get(value);
+			if (!rewritten) {
+				const tokens = uniqueTokens(value);
+				if (tokens.length === 0) return;
+				const key = getDesignKey();
+				if (key === null) {
+					context.report({ node, messageId: "cssNotFound", data: { path: cssFile } });
+					return;
+				}
+				let canonicalOf: Map<string, string>;
+				try { canonicalOf = canonicalizeTokens(key, tokens, rem); } catch { return; }
+				rewritten = rewriteClassValue(value, canonicalOf);
+				checkedValues.set(value, rewritten);
 			}
-			let canonicalOf: Map<string, string>;
-			try { canonicalOf = canonicalizeTokens(key, tokens, rem); } catch { return; }
-			const { fixed, changes } = rewriteClassValue(value, canonicalOf);
+			const { fixed, changes } = rewritten;
 			if (changes.length === 0) return;
 			const summary = summarizeChanges(changes);
 			context.report({

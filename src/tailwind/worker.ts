@@ -34,5 +34,6 @@ runAsWorker(async (job: WorkerJob) => {
 
 	const designSystem = designSystems.get(job.key);
 	if (!designSystem) throw new Error(`Tailwind design system not loaded for "${job.key}"`);
-	return designSystem.canonicalizeCandidates(job.candidates, { rem: job.rem });
+	// Tailwind deduplicates canonical spellings, so a batch result is not positional.
+	return job.candidates.map(candidate => designSystem.canonicalizeCandidates([candidate], { rem: job.rem })[0] ?? candidate);
 });
