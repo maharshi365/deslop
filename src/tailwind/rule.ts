@@ -1,7 +1,7 @@
 import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
 import { rewriteClassValue, summarizeChanges, uniqueTokens } from "./candidates.ts";
-import { canonicalizeTokens, ensureDesignSystem, resolveCssPath } from "./design-system.ts";
+import { canonicalizeTokens, ensureDesignSystem, getDesignSystemVersion, resolveCssPath } from "./design-system.ts";
 
 export const PLUGIN_NAME = "deslop";
 export const RULE_ID = "canonical-class-names";
@@ -9,6 +9,7 @@ export const RULE_ID = "canonical-class-names";
 const DEFAULT_ATTRIBUTES = ["class", "className"];
 const DEFAULT_CALLEE_FUNCTIONS = ["cn", "clsx", "cva", "twMerge", "tw", "classNames", "cx"];
 const DEFAULT_ROOT_FONT_SIZE = 16;
+const MAX_CACHED_VALUES = 10_000;
 
 interface RuleOptions {
 	cssPath: string;
@@ -49,8 +50,11 @@ export const canonicalClassNames = defineRule({
 		let cssFile = "";
 		let designKey: string | false | null = null;
 		const checkedValues = new Map<string, ReturnType<typeof rewriteClassValue>>();
+		let checkedVersion: number | undefined;
 
 		function initFile() {
+			const previousRem = rem;
+			const previousCssFile = cssFile;
 			const options = (context.options?.[0] ?? {}) as Partial<RuleOptions>;
 			attributes = new Set(options.attributes ?? DEFAULT_ATTRIBUTES);
 			callees = new Set(options.calleeFunctions ?? DEFAULT_CALLEE_FUNCTIONS);
@@ -61,29 +65,37 @@ export const canonicalClassNames = defineRule({
 				cssFile = options.cssPath ?? "";
 			}
 			designKey = null;
-			checkedValues.clear();
+			if (previousRem !== rem || previousCssFile !== cssFile) checkedValues.clear();
 		}
 
 		function getDesignKey(): string | null {
 			if (designKey === null) {
-				try { designKey = ensureDesignSystem(cssFile); } catch { designKey = false; }
+				try {
+					designKey = ensureDesignSystem(cssFile);
+					const version = getDesignSystemVersion(designKey);
+					if (checkedVersion !== version) {
+						checkedValues.clear();
+						checkedVersion = version;
+					}
+				} catch { designKey = false; }
 			}
 			return designKey === false ? null : designKey;
 		}
 
 		function checkStringNode(node: StringNode, value: string) {
+			if (!/\S/.test(value)) return;
+			const key = getDesignKey();
+			if (key === null) {
+				context.report({ node, messageId: "cssNotFound", data: { path: cssFile } });
+				return;
+			}
 			let rewritten = checkedValues.get(value);
 			if (!rewritten) {
 				const tokens = uniqueTokens(value);
-				if (tokens.length === 0) return;
-				const key = getDesignKey();
-				if (key === null) {
-					context.report({ node, messageId: "cssNotFound", data: { path: cssFile } });
-					return;
-				}
 				let canonicalOf: Map<string, string>;
 				try { canonicalOf = canonicalizeTokens(key, tokens, rem); } catch { return; }
 				rewritten = rewriteClassValue(value, canonicalOf);
+				if (checkedValues.size >= MAX_CACHED_VALUES) checkedValues.clear();
 				checkedValues.set(value, rewritten);
 			}
 			const { fixed, changes } = rewritten;

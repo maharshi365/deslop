@@ -14,7 +14,9 @@ const varied = process.argv.includes("--varied");
 const moduleArg = process.argv.indexOf("--module-dir");
 const moduleDir = moduleArg === -1 ? path.join(root, "dist") : path.resolve(process.argv[moduleArg + 1]);
 
-if (process.argv.includes("--child")) {
+if (process.argv.includes("--project")) {
+	await import("./bench-project.mjs");
+} else if (process.argv.includes("--child")) {
 	const { canonicalClassNames } = await import(pathToFileURL(path.join(moduleDir, "tailwind/rule.js")));
 	const preferredTemp = path.join(os.tmpdir(), "opencode");
 	const dir = fs.mkdtempSync(path.join(fs.existsSync(preferredTemp) ? preferredTemp : os.tmpdir(), "deslop-bench-"));

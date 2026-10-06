@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@tailwindcss/node", () => ({ __unstable__loadDesignSystem: mocks.load }));
 vi.mock("synckit", () => ({ runAsWorker: mocks.register }));
+vi.mock("../src/tailwind/optimize-system.ts", () => ({ optimizeDesignSystem: (system: unknown) => system }));
 
 it("preserves a result for every input when canonical spellings collide", async () => {
 	const canonical = new Map([["mt-[16px]", "mt-4"], ["mt-4", "mt-4"], ["text-[14px]", "text-sm"]]);

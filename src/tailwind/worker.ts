@@ -1,5 +1,6 @@
 import { __unstable__loadDesignSystem } from "@tailwindcss/node";
 import { runAsWorker } from "synckit";
+import { optimizeDesignSystem } from "./optimize-system.ts";
 
 interface LoadJob {
 	type: "load";
@@ -17,9 +18,7 @@ interface CanonicalizeJob {
 
 type WorkerJob = LoadJob | CanonicalizeJob;
 
-interface DesignSystem {
-	canonicalizeCandidates(candidates: Array<string>, options: { rem: number }): Array<string>;
-}
+type DesignSystem = ReturnType<typeof optimizeDesignSystem>;
 
 const designSystems = new Map<string, DesignSystem>();
 
@@ -27,7 +26,7 @@ runAsWorker(async (job: WorkerJob) => {
 	if (job.type === "load") {
 		designSystems.set(
 			job.key,
-			await __unstable__loadDesignSystem(job.cssContent, { base: job.base }) as DesignSystem,
+			optimizeDesignSystem(await __unstable__loadDesignSystem(job.cssContent, { base: job.base })),
 		);
 		return { ok: true };
 	}

@@ -52,6 +52,10 @@ export function ensureDesignSystem(cssFile: string): string {
 	return cssFile;
 }
 
+export function getDesignSystemVersion(key: string): number | undefined {
+	return loadedSystems.get(key);
+}
+
 export function canonicalizeTokens(key: string, tokens: Array<string>, rem: number): Map<string, string> {
 	if (tokens.length === 0) return new Map();
 

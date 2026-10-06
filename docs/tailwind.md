@@ -83,7 +83,9 @@ The benchmark runs the real rule callbacks and Tailwind worker against 100,000 c
 
 `coldMs` includes worker startup, CSS loading, and the first class check. `warmMs` measures the remaining workload. `totalMs` includes both. Results depend on the machine and the amount of class reuse.
 
-Canonical results are cached by CSS entry and root font size. Reloading the entry CSS clears them. Repeated string rewrites are cached within each file, but each occurrence still gets its own diagnostic and fix. Tailwind's initial canonicalization index can still be expensive; these caches do not remove that cold-start cost.
+Canonical results are cached by CSS entry and root font size. Reloading the entry CSS clears them. String rewrites are reused across files when the entry CSS version and font size match, with a limit of 10,000 retained strings. Each occurrence still gets its own diagnostic and fix.
+
+The worker partitions Tailwind's canonicalization index by declaration property set. Only classes with compatible properties participate in each lookup. It discovers properties through utility compilers without generating selectors or declaration sort orders, and reuses variant ordering until a new valid variant is parsed. This uses the design system returned by Tailwind's unstable API; output-equivalence tests cover themes, custom utilities, modifiers, variants, prefixes, and font sizes.
 
 Local measurements on Windows with Node 22.21.1 and Tailwind 4.3.3:
 
@@ -94,6 +96,9 @@ Local measurements on Windows with Node 22.21.1 and Tailwind 4.3.3:
 | Repeated: token + string caches | 1,558 ms | 47 ms | 1,605 ms | 2.98× |
 | Varied: original | 1,581 ms | 2,897 ms | 4,459 ms | — |
 | Varied: token + string caches | 1,585 ms | 199 ms | 1,783 ms | 2.50× |
+| Varied: partitioned index | 486 ms | 206 ms | 703 ms | 6.34× |
+| Varied: cheaper property discovery | 381 ms | 219 ms | 601 ms | 7.42× |
+| Varied: cross-file rewrites | 363 ms | 68 ms | 431 ms | 10.34× |
 
 Each column is a separate median, so cold and warm values may not sum to the total. These are synthetic rule workloads, not a guarantee of total-project lint speed.
 
