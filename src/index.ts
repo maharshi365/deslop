@@ -19,6 +19,7 @@ import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
 import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety-comment-for-type-assertion.ts";
 import { noCallOnlyAssertionsRule } from "./rules/no-call-only-assertions.ts";
 import { noPoorSubstringTestsRule } from "./rules/no-poor-substring-tests.ts";
+import { noRepeatedExpectCallRule } from "./rules/no-repeated-expect-call.ts";
 import { noPassThroughTypeAliasRule } from "./rules/no-pass-through-type-alias.ts";
 import { noDuplicateTypesRule } from "./rules/no-duplicate-types.ts";
 import { noDuplicateConstsRule } from "./rules/no-duplicate-consts.ts";
@@ -46,6 +47,7 @@ export const recommendedRules: Record<string, "error"> = {
 	"deslop/require-safety-comment-for-type-assertion": "error",
 	"deslop/no-call-only-assertions": "error",
 	"deslop/no-poor-substring-tests": "error",
+	"deslop/no-repeated-expect-call": "error",
 	"deslop/no-pass-through-type-alias": "error",
 	"typescript/no-deprecated": "error",
 	"typescript/no-require-imports": "error",
@@ -86,6 +88,7 @@ const deslopPlugin = eslintCompatPlugin({
 		"require-safety-comment-for-type-assertion": requireSafetyCommentForTypeAssertionRule,
 		"no-call-only-assertions": noCallOnlyAssertionsRule,
 		"no-poor-substring-tests": noPoorSubstringTestsRule,
+		"no-repeated-expect-call": noRepeatedExpectCallRule,
 		"no-constant-substring-tests": noPoorSubstringTestsRule,
 		"no-pass-through-type-alias": noPassThroughTypeAliasRule,
 		"no-duplicate-types": noDuplicateTypesRule,

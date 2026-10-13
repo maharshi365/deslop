@@ -62,6 +62,7 @@ export default defineConfig({
 | `no-call-only-assertions` | Recommended | Flags tests whose assertions only check mock calls. |
 | `no-module-mocking` | Recommended | Rejects Vitest and Jest module mocks. |
 | `no-poor-substring-tests` | Recommended | Rejects testing that a constant string contains substrings. |
+| `no-repeated-expect-call` | Recommended | Flags adjacent assertions that repeat the same call in test files. Reuse the result instead. No fixer. |
 
 ### Opt-in rules
 
