@@ -2,6 +2,8 @@
 
 `deslop/no-reexports-outside-entrypoints` keeps re-exports in configured entrypoint files. It is opt-in and is not enabled by the recommended config.
 
+Import symbols directly from their source for internal use. To expose a symbol to external consumers, re-export it from a package entrypoint.
+
 ## Configuration
 
 ```ts

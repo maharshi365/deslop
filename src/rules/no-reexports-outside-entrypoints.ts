@@ -14,7 +14,7 @@ export const noReexportsOutsideEntrypointsRule = defineRule({
 		type: "suggestion",
 		docs: { description: "Disallow re-exports outside configured entrypoint files" },
 		messages: {
-			reexport: "Re-export this symbol from a package entrypoint instead of this file.",
+			reexport: "Import this symbol directly from its source, or re-export it from a package entrypoint for external consumers.",
 		},
 		schema: [{
 			type: "object",
