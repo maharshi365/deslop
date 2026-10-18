@@ -24,6 +24,7 @@ import { noPassThroughTypeAliasRule } from "./rules/no-pass-through-type-alias.t
 import { noDuplicateTypesRule } from "./rules/no-duplicate-types.ts";
 import { noDuplicateConstsRule } from "./rules/no-duplicate-consts.ts";
 import { noRenamedImportsRule } from "./rules/no-renamed-imports.ts";
+import { noReexportsOutsideEntrypointsRule } from "./rules/no-reexports-outside-entrypoints.ts";
 import { canonicalClassNames } from "./tailwind/rule.ts";
 
 /** Every `deslop/*` rule, plus selected standard rules, each set to `"error"`. Spread into the `rules` field of an oxlint config. */
@@ -94,6 +95,7 @@ const deslopPlugin = eslintCompatPlugin({
 		"no-duplicate-types": noDuplicateTypesRule,
 		"no-duplicate-consts": noDuplicateConstsRule,
 		"no-renamed-imports": noRenamedImportsRule,
+		"no-reexports-outside-entrypoints": noReexportsOutsideEntrypointsRule,
 		// Opt-in: NOT in `recommendedRules`. Requires a `cssPath` option, so users add it manually.
 		"canonical-class-names": canonicalClassNames,
 	},
