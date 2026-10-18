@@ -2,7 +2,7 @@
 
 Opinionated Oxlint rules that reject low-evidence, low-signal, AI-slop code patterns.
 
-Rules are vendored from [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) (generic rules) alongside additional deslop rules, all renamed under the `deslop/*` namespace. The vendored source is MIT licensed; see Credits below.
+Combines vendored anti-slop rules with additional rules under the `deslop/*` namespace. See Credits for attribution.
 
 ## Install
 
@@ -28,71 +28,63 @@ export default defineConfig({
 
 ## Rules
 
+All rules below are enabled by the recommended config unless listed as opt-in.
+
 ### Type safety and evidence
 
-| Rule | Status | Description |
-| --- | --- | --- |
-| `no-chained-type-assertions` | Recommended | Rejects nested `as` / angle-bracket assertions that fabricate evidence. |
-| `no-conditional-empty-object-spread` | Recommended | Reports object spreads using a conditional `{}` branch to omit fields. |
-| `no-known-value-widening` | Recommended | Rejects known expressions flowing into explicit `unknown`, `object`, or open dictionaries. |
-| `no-object-parameters` | Recommended | Rejects `object` on function inputs. |
-| `no-runtime-typeof` | Recommended | Requires boundary parsing instead of ad hoc `typeof` narrowing. |
-| `no-unknown-parameters` | Recommended | Rejects `unknown` on function inputs. |
-| `no-unknown-returns` | Recommended | Rejects return contracts resolving to `unknown`. |
-| `no-unknown-type-aliases` | Recommended | Rejects aliases whose resolved type is `unknown`. |
-| `no-unsafe-dictionary-type` | Recommended | Rejects dictionary values based on unsafe escape hatches. |
-| `no-widen-then-assert` | Recommended | Rejects widening known evidence before narrowing assertions. |
-| `require-safety-comment-for-type-assertion` | Recommended | Requires an invariant justification for non-const assertions. |
-| `no-pass-through-type-alias` | Recommended | Disallows aliases that only rename another type. |
+| Rule | Description |
+| --- | --- |
+| `no-chained-type-assertions` | Rejects nested `as` / angle-bracket assertions that fabricate evidence. |
+| `no-conditional-empty-object-spread` | Reports object spreads using a conditional `{}` branch to omit fields. |
+| `no-known-value-widening` | Rejects known expressions flowing into explicit `unknown`, `object`, or open dictionaries. |
+| `no-object-parameters` | Rejects `object` on function inputs. |
+| `no-runtime-typeof` | Requires boundary parsing instead of ad hoc `typeof` narrowing. |
+| `no-unknown-parameters` | Rejects `unknown` on function inputs. |
+| `no-unknown-returns` | Rejects return contracts resolving to `unknown`. |
+| `no-unknown-type-aliases` | Rejects aliases whose resolved type is `unknown`. |
+| `no-unsafe-dictionary-type` | Rejects dictionary values based on unsafe escape hatches. |
+| `no-widen-then-assert` | Rejects widening known evidence before narrowing assertions. |
+| `require-safety-comment-for-type-assertion` | Requires an invariant justification for non-const assertions. |
+| `no-pass-through-type-alias` | Disallows aliases that only rename another type. |
 
 ### Code quality and APIs
 
-| Rule | Status | Description |
-| --- | --- | --- |
-| `no-array-filter-map` | Recommended | Rejects adjacent eager array filter/map passes; allows lazy iterator pipelines. |
-| `no-reduce-accumulator-copy` | Recommended | Rejects non-spread accumulator copies inside reducers. Enable native `oxc/no-accumulating-spread` alongside it. |
-| `no-reflect-apply` | Recommended | Rejects global `Reflect.apply`. |
-| `no-reflect-get` | Recommended | Rejects global `Reflect.get`. |
-| `no-shape-in-symbol-names` | Recommended | Rejects `shape` in locally owned symbol names. |
+| Rule | Description |
+| --- | --- |
+| `no-array-filter-map` | Rejects adjacent eager array filter/map passes; allows lazy iterator pipelines. |
+| `no-reduce-accumulator-copy` | Rejects non-spread accumulator copies inside reducers. Enable native `oxc/no-accumulating-spread` alongside it. |
+| `no-reflect-apply` | Rejects global `Reflect.apply`. |
+| `no-reflect-get` | Rejects global `Reflect.get`. |
+| `no-shape-in-symbol-names` | Rejects `shape` in locally owned symbol names. |
 
 ### Tests
 
-| Rule | Status | Description |
-| --- | --- | --- |
-| `no-call-only-assertions` | Recommended | Flags tests whose assertions only check mock calls. |
-| `no-module-mocking` | Recommended | Rejects Vitest and Jest module mocks. |
-| `no-poor-substring-tests` | Recommended | Rejects testing that a constant string contains substrings. |
-| `no-repeated-expect-call` | Recommended | Flags adjacent assertions that repeat the same call in test files. Reuse the result instead. No fixer. |
+| Rule | Description |
+| --- | --- |
+| `no-call-only-assertions` | Flags tests whose assertions only check mock calls. |
+| `no-module-mocking` | Rejects Vitest and Jest module mocks. |
+| `no-poor-substring-tests` | Rejects testing that a constant string contains substrings. |
+| `no-repeated-expect-call` | Flags adjacent assertions that repeat the same call in test files. Reuse the result instead. No fixer. |
 
 ### Opt-in rules
 
-| Rule | Status | Description |
-| --- | --- | --- |
-| [`no-duplicate-consts`](docs/no-duplicate-consts.md) | Opt-in | Reports all-caps constants with the same static value in different files. |
-| [`no-duplicate-types`](docs/no-duplicate-types.md) | Opt-in | Reports exact duplicate object contracts. No fixer. |
-| [`no-renamed-imports`](docs/no-renamed-imports.md) | Opt-in | Fixes unnecessary named-import aliases when the original name has no module-level conflict. |
-| [`no-reexports-outside-entrypoints`](docs/no-reexports-outside-entrypoints.md) | Opt-in | Keeps re-exports in configured entrypoint files. No fixer. |
-| [`canonical-class-names`](docs/tailwind.md) | Opt-in | Fixes non-canonical Tailwind CSS v4 class spellings. |
+| Rule | Description |
+| --- | --- |
+| [`no-duplicate-consts`](docs/no-duplicate-consts.md) | Reports all-caps constants with the same static value in different files. |
+| [`no-duplicate-types`](docs/no-duplicate-types.md) | Reports exact duplicate object contracts. No fixer. |
+| [`no-renamed-imports`](docs/no-renamed-imports.md) | Fixes unnecessary named-import aliases when the original name has no module-level conflict. |
+| [`no-reexports-outside-entrypoints`](docs/no-reexports-outside-entrypoints.md) | Keeps re-exports in configured entrypoint files. No fixer. |
+| [`canonical-class-names`](docs/tailwind.md) | Fixes non-canonical Tailwind CSS v4 class spellings. |
 
 ### Standard rules enabled by the recommended config
 
-| Standard rule | Status | Description |
-| --- | --- | --- |
-| `typescript/no-deprecated` | Recommended | Disallows using code marked `@deprecated`. Requires type-aware linting. |
-| `typescript/no-require-imports` | Recommended | Disallows CommonJS `require()` imports. |
-| `typescript/no-floating-promises` | Recommended | Disallows floating promises. Requires type-aware linting. |
-| `typescript/no-unnecessary-condition` | Recommended | Disallows always truthy/falsy/nullish conditions. Requires type-aware linting. |
-| `no-unreachable` | Recommended | Disallows unreachable code. |
-
-## Guides
-
-| Guide | Contents |
+| Standard rule | Description |
 | --- | --- |
-| [No duplicate consts](docs/no-duplicate-consts.md) | Configuration and exact static-value comparison behavior. |
-| [No duplicate types](docs/no-duplicate-types.md) | Exact comparison behavior, worker scope, complete TypeScript/JSON examples, and every supported option. |
-| [No renamed imports](docs/no-renamed-imports.md) | When named-import aliases are fixed and how conflicts are handled. |
-| [No re-exports outside entrypoints](docs/no-reexports-outside-entrypoints.md) | Entrypoint globs, rejected forwarding patterns, and the nested-barrel caveat. |
-| [Tailwind canonical class names](docs/tailwind.md) | Tailwind v4 setup, complete TypeScript/JSON examples, and every supported option. |
+| `typescript/no-deprecated` | Disallows using code marked `@deprecated`. Requires type-aware linting. |
+| `typescript/no-require-imports` | Disallows CommonJS `require()` imports. |
+| `typescript/no-floating-promises` | Disallows floating promises. Requires type-aware linting. |
+| `typescript/no-unnecessary-condition` | Disallows always truthy/falsy/nullish conditions. Requires type-aware linting. |
+| `no-unreachable` | Disallows unreachable code. |
 
 ## Credits
 
