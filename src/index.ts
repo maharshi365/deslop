@@ -21,6 +21,7 @@ import { noCallOnlyAssertionsRule } from "./rules/no-call-only-assertions.ts";
 import { noPoorSubstringTestsRule } from "./rules/no-poor-substring-tests.ts";
 import { noRepeatedExpectCallRule } from "./rules/no-repeated-expect-call.ts";
 import { noPassThroughTypeAliasRule } from "./rules/no-pass-through-type-alias.ts";
+import { noPassThroughSchemaRule } from "./rules/no-pass-through-schema.ts";
 import { noDuplicateTypesRule } from "./rules/no-duplicate-types.ts";
 import { noDuplicateConstsRule } from "./rules/no-duplicate-consts.ts";
 import { noRenamedImportsRule } from "./rules/no-renamed-imports.ts";
@@ -92,6 +93,7 @@ const deslopPlugin = eslintCompatPlugin({
 		"no-repeated-expect-call": noRepeatedExpectCallRule,
 		"no-constant-substring-tests": noPoorSubstringTestsRule,
 		"no-pass-through-type-alias": noPassThroughTypeAliasRule,
+		"no-pass-through-schema": noPassThroughSchemaRule,
 		"no-duplicate-types": noDuplicateTypesRule,
 		"no-duplicate-consts": noDuplicateConstsRule,
 		"no-renamed-imports": noRenamedImportsRule,

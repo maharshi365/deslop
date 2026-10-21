@@ -72,6 +72,7 @@ All rules below are enabled by the recommended config unless listed as opt-in.
 | --- | --- |
 | [`no-duplicate-consts`](docs/no-duplicate-consts.md) | Reports all-caps constants with the same static value in different files. |
 | [`no-duplicate-types`](docs/no-duplicate-types.md) | Reports exact duplicate object contracts. No fixer. |
+| [`no-pass-through-schema`](docs/no-pass-through-schema.md) | Reports const aliases that only rename known schemas. Supports Zod, ArkType, and configured imports. No fixer. |
 | [`no-renamed-imports`](docs/no-renamed-imports.md) | Fixes unnecessary named-import aliases when the original name has no module-level conflict. |
 | [`no-reexports-outside-entrypoints`](docs/no-reexports-outside-entrypoints.md) | Keeps re-exports in configured entrypoint files. No fixer. |
 | [`canonical-class-names`](docs/tailwind.md) | Fixes non-canonical Tailwind CSS v4 class spellings. |
