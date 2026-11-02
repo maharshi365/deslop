@@ -89,7 +89,7 @@ All rules below are enabled by the recommended config unless listed as opt-in.
 
 ## Credits
 
-- Generic rules vendored verbatim from [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) (MIT, © Dillon Mulroy), including `src/shared/*`.
+- Generic rules vendored verbatim from [dmmulroy/anti-slop](https://github.com/dmmulroy/anti-slop) (MIT, © Dillon Mulroy) in `src/vendor/anti-slop/`, including shared helpers.
 
 ## License
 

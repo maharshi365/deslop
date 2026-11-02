@@ -1,22 +1,23 @@
 import { eslintCompatPlugin } from "@oxlint/plugins";
 
-import { noArrayFilterMapRule } from "./rules/no-array-filter-map.ts";
-import { noReduceAccumulatorCopyRule } from "./rules/no-reduce-accumulator-copy.ts";
-import { noChainedTypeAssertionsRule } from "./rules/no-chained-type-assertions.ts";
-import { noConditionalEmptyObjectSpreadRule } from "./rules/no-conditional-empty-object-spread.ts";
-import { noKnownValueWideningRule } from "./rules/no-known-value-widening.ts";
-import { noModuleMockingRule } from "./rules/no-module-mocking.ts";
-import { noObjectParametersRule } from "./rules/no-object-parameters.ts";
-import { noReflectApplyRule } from "./rules/no-reflect-apply.ts";
-import { noReflectGetRule } from "./rules/no-reflect-get.ts";
-import { noRuntimeTypeofRule } from "./rules/no-runtime-typeof.ts";
-import { noForbiddenTermInSymbolNamesRule } from "./rules/no-shape-in-symbol-names.ts";
-import { noUnknownParametersRule } from "./rules/no-unknown-parameters.ts";
-import { noUnknownReturnsRule } from "./rules/no-unknown-returns.ts";
-import { noUnknownTypeAliasesRule } from "./rules/no-unknown-type-aliases.ts";
-import { noUnsafeDictionaryTypeRule } from "./rules/no-unsafe-dictionary-type.ts";
-import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
-import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety-comment-for-type-assertion.ts";
+import { noArrayFilterMapRule } from "./vendor/anti-slop/rules/no-array-filter-map.ts";
+import { noReduceAccumulatorCopyRule } from "./vendor/anti-slop/rules/no-reduce-accumulator-copy.ts";
+import { noChainedTypeAssertionsRule } from "./vendor/anti-slop/rules/no-chained-type-assertions.ts";
+import { noConditionalEmptyObjectSpreadRule } from "./vendor/anti-slop/rules/no-conditional-empty-object-spread.ts";
+import { noKnownValueWideningRule } from "./vendor/anti-slop/rules/no-known-value-widening.ts";
+import { noModuleMockingRule } from "./vendor/anti-slop/rules/no-module-mocking.ts";
+import { noObjectParametersRule } from "./vendor/anti-slop/rules/no-object-parameters.ts";
+import { noReflectApplyRule } from "./vendor/anti-slop/rules/no-reflect-apply.ts";
+import { noReflectGetRule } from "./vendor/anti-slop/rules/no-reflect-get.ts";
+import { noRestrictedSyntaxRule } from "./rules/no-restricted-syntax.ts";
+import { noRuntimeTypeofRule } from "./vendor/anti-slop/rules/no-runtime-typeof.ts";
+import { noForbiddenTermInSymbolNamesRule } from "./vendor/anti-slop/rules/no-shape-in-symbol-names.ts";
+import { noUnknownParametersRule } from "./vendor/anti-slop/rules/no-unknown-parameters.ts";
+import { noUnknownReturnsRule } from "./vendor/anti-slop/rules/no-unknown-returns.ts";
+import { noUnknownTypeAliasesRule } from "./vendor/anti-slop/rules/no-unknown-type-aliases.ts";
+import { noUnsafeDictionaryTypeRule } from "./vendor/anti-slop/rules/no-unsafe-dictionary-type.ts";
+import { noWidenThenAssertRule } from "./vendor/anti-slop/rules/no-widen-then-assert.ts";
+import { requireSafetyCommentForTypeAssertionRule } from "./vendor/anti-slop/rules/require-safety-comment-for-type-assertion.ts";
 import { noCallOnlyAssertionsRule } from "./rules/no-call-only-assertions.ts";
 import { noPoorSubstringTestsRule } from "./rules/no-poor-substring-tests.ts";
 import { noRepeatedExpectCallRule } from "./rules/no-repeated-expect-call.ts";
@@ -29,9 +30,10 @@ import { noReexportsOutsideEntrypointsRule } from "./rules/no-reexports-outside-
 import { canonicalClassNames } from "./tailwind/rule.ts";
 
 /** Every `deslop/*` rule, plus selected standard rules, each set to `"error"`. Spread into the `rules` field of an oxlint config. */
-export const recommendedRules: Record<string, "error"> = {
+export const recommendedRules: Record<string, "error" | ["error", { selector: string; message: string }]> = {
 	"deslop/no-array-filter-map": "error",
 	"deslop/no-reduce-accumulator-copy": "error",
+	"oxc/no-accumulating-spread": "error",
 	"deslop/no-chained-type-assertions": "error",
 	"deslop/no-conditional-empty-object-spread": "error",
 	"deslop/no-known-value-widening": "error",
@@ -56,6 +58,13 @@ export const recommendedRules: Record<string, "error"> = {
 	"typescript/no-floating-promises": "error",
 	"typescript/no-unnecessary-condition": "error",
 	"no-unreachable": "error",
+	"deslop/no-restricted-syntax": [
+		"error",
+		{
+			selector: "NewExpression[callee.name='Map'][arguments.length=0]:not([typeArguments])",
+			message: "Bare new Map() infers Map<any, any>. Provide entries so types can be inferred.",
+		},
+	],
 };
 
 /** ESLint flat-config style configs. `recommended` enables every recommended `deslop/*` rule as `"error"` (excluding opt-in rules), plus standard `typescript/*` rules. The `typescript/*` rules require type-aware linting (`options.typeAware`), so `recommended` sets it. */
@@ -80,6 +89,7 @@ const deslopPlugin = eslintCompatPlugin({
 		"no-object-parameters": noObjectParametersRule,
 		"no-reflect-apply": noReflectApplyRule,
 		"no-reflect-get": noReflectGetRule,
+		"no-restricted-syntax": noRestrictedSyntaxRule,
 		"no-runtime-typeof": noRuntimeTypeofRule,
 		"no-shape-in-symbol-names": noForbiddenTermInSymbolNamesRule,
 		"no-unknown-parameters": noUnknownParametersRule,

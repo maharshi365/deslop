@@ -1,7 +1,7 @@
 import { defineRule } from "@oxlint/plugins";
 import type { ESTree, SourceCode } from "@oxlint/plugins";
 
-import { resolveVariable } from "../shared/scope.ts";
+import { resolveVariable } from "../vendor/anti-slop/shared/scope.ts";
 
 const TEST_FILE = /(?:^|[/\\])(?:__tests__|tests?)(?:[/\\]|$)|(?:[._](?:test|spec))\.[cm]?[jt]sx?$/i;
 const TEST_MODULES = new Set(["bun:test", "@jest/globals", "vitest"]);

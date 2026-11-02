@@ -2,7 +2,7 @@ import { matchesGlob, relative } from "node:path";
 import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
 
-import { resolveVariable } from "../shared/scope.ts";
+import { resolveVariable } from "../vendor/anti-slop/shared/scope.ts";
 
 interface Options {
 	entrypoints?: string[];
