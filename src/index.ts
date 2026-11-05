@@ -56,6 +56,7 @@ export const recommendedRules: Record<string, "error" | ["error", { selector: st
 	"typescript/no-deprecated": "error",
 	"typescript/no-require-imports": "error",
 	"typescript/no-floating-promises": "error",
+	"typescript/await-thenable": "error",
 	"typescript/no-unnecessary-condition": "error",
 	"no-unreachable": "error",
 	"deslop/no-restricted-syntax": [

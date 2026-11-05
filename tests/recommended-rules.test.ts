@@ -2,6 +2,11 @@ import { expect, it } from "vitest";
 
 import plugin, { configs, recommendedRules } from "../src/index.ts";
 
+it("rejects awaiting non-thenable values in the recommended config", () => {
+	expect(configs.recommended.rules["typescript/await-thenable"]).toBe("error");
+	expect(configs.recommended.options.typeAware).toBe(true);
+});
+
 it("enables accumulating spread checks in the recommended config", () => {
 	expect(configs.recommended.rules["oxc/no-accumulating-spread"]).toBe("error");
 });
