@@ -11,6 +11,11 @@ it("enables accumulating spread checks in the recommended config", () => {
 	expect(configs.recommended.rules["oxc/no-accumulating-spread"]).toBe("error");
 });
 
+it("requires exhaustive switches in the recommended config", () => {
+	expect(configs.recommended.rules["typescript/switch-exhaustiveness-check"]).toBe("error");
+	expect(configs.recommended.options.typeAware).toBe(true);
+});
+
 it("rejects bare Map constructors in the recommended config", () => {
 	expect(recommendedRules["deslop/no-restricted-syntax"]).toEqual([
 		"error",

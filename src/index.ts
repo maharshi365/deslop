@@ -58,6 +58,7 @@ export const recommendedRules: Record<string, "error" | ["error", { selector: st
 	"typescript/no-floating-promises": "error",
 	"typescript/await-thenable": "error",
 	"typescript/no-unnecessary-condition": "error",
+	"typescript/switch-exhaustiveness-check": "error",
 	"no-unreachable": "error",
 	"deslop/no-restricted-syntax": [
 		"error",
