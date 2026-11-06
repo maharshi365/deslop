@@ -27,9 +27,10 @@ import { noDuplicateTypesRule } from "./rules/no-duplicate-types.ts";
 import { noDuplicateConstsRule } from "./rules/no-duplicate-consts.ts";
 import { noRenamedImportsRule } from "./rules/no-renamed-imports.ts";
 import { noReexportsOutsideEntrypointsRule } from "./rules/no-reexports-outside-entrypoints.ts";
+import { maxBooleanConditionsRule } from "./rules/max-boolean-conditions.ts";
 import { canonicalClassNames } from "./tailwind/rule.ts";
 
-/** Every `deslop/*` rule, plus selected standard rules, each set to `"error"`. Spread into the `rules` field of an oxlint config. */
+/** Recommended `deslop/*` rules, plus selected standard rules, each set to `"error"`. Spread into the `rules` field of an oxlint config. */
 export const recommendedRules: Record<string, "error" | ["error", { selector: string; message: string }]> = {
 	"deslop/no-array-filter-map": "error",
 	"deslop/no-reduce-accumulator-copy": "error",
@@ -110,6 +111,7 @@ const deslopPlugin = eslintCompatPlugin({
 		"no-duplicate-consts": noDuplicateConstsRule,
 		"no-renamed-imports": noRenamedImportsRule,
 		"no-reexports-outside-entrypoints": noReexportsOutsideEntrypointsRule,
+		"max-boolean-conditions": maxBooleanConditionsRule,
 		// Opt-in: NOT in `recommendedRules`. Requires a `cssPath` option, so users add it manually.
 		"canonical-class-names": canonicalClassNames,
 	},

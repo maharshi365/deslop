@@ -2,6 +2,11 @@ import { expect, it } from "vitest";
 
 import plugin, { configs, recommendedRules } from "../src/index.ts";
 
+it("keeps Boolean condition limits opt-in", () => {
+	expect(plugin.rules).toHaveProperty("max-boolean-conditions");
+	expect(recommendedRules).not.toHaveProperty("deslop/max-boolean-conditions");
+});
+
 it("rejects awaiting non-thenable values in the recommended config", () => {
 	expect(configs.recommended.rules["typescript/await-thenable"]).toBe("error");
 	expect(configs.recommended.options.typeAware).toBe(true);

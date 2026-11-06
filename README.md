@@ -70,6 +70,7 @@ All rules below are enabled by the recommended config unless listed as opt-in.
 
 | Rule | Description |
 | --- | --- |
+| [`max-boolean-conditions`](docs/max-boolean-conditions.md) | Limits top-level terms in `if` and loop conditions. Supports a custom limit and message. No fixer. |
 | [`no-duplicate-consts`](docs/no-duplicate-consts.md) | Reports all-caps constants with the same static value in different files. |
 | [`no-duplicate-types`](docs/no-duplicate-types.md) | Reports exact duplicate object contracts. No fixer. |
 | [`no-pass-through-schema`](docs/no-pass-through-schema.md) | Reports const aliases that only rename known schemas. Supports Zod, ArkType, and configured imports. No fixer. |
