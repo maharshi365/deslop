@@ -60,6 +60,7 @@ export const recommendedRules: Record<string, "error" | ["error", { selector: st
 	"typescript/await-thenable": "error",
 	"typescript/no-unnecessary-condition": "error",
 	"typescript/switch-exhaustiveness-check": "error",
+	"typescript/no-inferrable-types": "error",
 	"no-unreachable": "error",
 	"deslop/no-restricted-syntax": [
 		"error",

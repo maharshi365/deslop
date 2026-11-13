@@ -21,6 +21,10 @@ it("requires exhaustive switches in the recommended config", () => {
 	expect(configs.recommended.options.typeAware).toBe(true);
 });
 
+it("rejects inferrable type annotations in the recommended config", () => {
+	expect(configs.recommended.rules["typescript/no-inferrable-types"]).toBe("error");
+});
+
 it("rejects bare Map constructors in the recommended config", () => {
 	expect(recommendedRules["deslop/no-restricted-syntax"]).toEqual([
 		"error",
