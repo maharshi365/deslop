@@ -131,6 +131,7 @@ export const noUnsafeDictionaryTypeRule = defineRule({
 				environment = createTypeEnvironment(
 					node,
 					context.sourceCode.visitorKeys,
+					context.sourceCode.text,
 				);
 			},
 			TSTypeReference: reportIfUnsafe,

@@ -39,6 +39,7 @@ export const noUnknownTypeAliasesRule = defineRule({
 				environment = createTypeAliasEnvironment(
 					node,
 					context.sourceCode.visitorKeys,
+					context.sourceCode.text,
 				);
 			},
 			TSTypeAliasDeclaration(node) {

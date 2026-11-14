@@ -2,6 +2,7 @@ import { defineRule } from "@oxlint/plugins";
 import type { ESTree } from "@oxlint/plugins";
 
 const FORBIDDEN_SYMBOL_NAME = "shape";
+const FORBIDDEN_SYMBOL_TEXT = /shape/i;
 
 function containsForbiddenSymbolName(name: string): boolean {
   return name.toLowerCase().includes(FORBIDDEN_SYMBOL_NAME);
@@ -38,6 +39,8 @@ export const noForbiddenTermInSymbolNamesRule = defineRule({
     };
 
     return {
+      // Every symbol name is source text, so a file without the term cannot report.
+      before: () => FORBIDDEN_SYMBOL_TEXT.test(context.sourceCode.text),
       Identifier: reportForbiddenSymbolName,
       PrivateIdentifier: reportForbiddenSymbolName,
       JSXIdentifier: reportForbiddenSymbolName,

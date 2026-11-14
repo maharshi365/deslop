@@ -57,6 +57,8 @@ export const noRuntimeTypeofRule = defineRule({
 	},
 	createOnce(context) {
 		return {
+			// Every report is a `typeof` operator, so a file without the keyword cannot report.
+			before: () => context.sourceCode.text.includes("typeof"),
 			UnaryExpression(node) {
 				const option = context.options?.[0];
 				const allowInTypeGuards =

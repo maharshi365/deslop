@@ -325,12 +325,14 @@ export const noWidenThenAssertRule = defineRule({
     },
   },
   createOnce(context) {
-    let scopes: Parameters<typeof resolvedVariableForIdentifier>[0] = [];
+    let fileScopes: Parameters<typeof resolvedVariableForIdentifier>[0] | null = null;
 
     const checkAssertion = (node: ESTree.TSAsExpression | ESTree.TSTypeAssertion) => {
       const expression = assertedExpression(node);
       if (expression.type !== "Identifier") return;
 
+      // Scope analysis is costly; read it only once a candidate assertion exists.
+      const scopes = (fileScopes ??= context.sourceCode.scopeManager.scopes);
       const variable = resolvedVariableForIdentifier(scopes, expression);
       if (variable === null) return;
       const widened = widenedBinding(variable, scopes);
@@ -357,7 +359,7 @@ export const noWidenThenAssertRule = defineRule({
 
     return {
       Program() {
-        scopes = context.sourceCode.scopeManager.scopes;
+        fileScopes = null;
       },
       TSAsExpression: checkAssertion,
       TSTypeAssertion: checkAssertion,

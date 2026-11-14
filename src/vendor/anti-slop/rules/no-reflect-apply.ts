@@ -17,6 +17,8 @@ export const noReflectApplyRule = defineRule({
   },
   createOnce(context) {
     return {
+      // Every report calls through the `Reflect` identifier.
+      before: () => context.sourceCode.text.includes("Reflect"),
       CallExpression(node) {
         if (node.callee.type === "Super" || node.callee.type === "V8IntrinsicExpression") return;
         if (isGlobalReflectMethodCall(context.sourceCode, node.callee, "apply")) {

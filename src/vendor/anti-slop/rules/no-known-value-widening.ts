@@ -19,6 +19,8 @@ import type { ESTree, SourceCode, Variable } from "@oxlint/plugins";
 
 type FunctionExpression = ESTree.ArrowFunctionExpression | ESTree.Function;
 
+const TYPE_PREDICATE_KEYWORD = /\b(?:asserts|is)\b/;
+
 function unwrapExpression(expression: ESTree.Expression): ESTree.Expression {
 	let current = expression;
 	while (
@@ -273,6 +275,7 @@ export const noKnownValueWideningRule = defineRule({
 	},
 	createOnce(context) {
 		let environment: TypeEnvironment | null = null;
+		let hasTypePredicateKeyword: boolean | null = null;
 
 		const reportFlow = (
 			expression: ESTree.Expression,
@@ -299,9 +302,11 @@ export const noKnownValueWideningRule = defineRule({
 
 		return {
 			Program(node) {
+				hasTypePredicateKeyword = null;
 				environment = createTypeEnvironment(
 					node,
 					context.sourceCode.visitorKeys,
+					context.sourceCode.text,
 				);
 			},
 			VariableDeclarator(node) {
@@ -342,6 +347,9 @@ export const noKnownValueWideningRule = defineRule({
 			},
 			CallExpression(node) {
 				if (environment === null) return;
+				// A report needs a local type predicate (`x is T` or `asserts x`) in this file.
+				hasTypePredicateKeyword ??= TYPE_PREDICATE_KEYWORD.test(context.sourceCode.text);
+				if (!hasTypePredicateKeyword) return;
 				const owner = localFunctionForCall(context.sourceCode, node.callee);
 				if (owner === null) return;
 				const parameterIndex = typePredicateSubjectIndex(context.sourceCode, owner);

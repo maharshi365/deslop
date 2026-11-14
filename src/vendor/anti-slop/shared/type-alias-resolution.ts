@@ -82,48 +82,106 @@ function declaredTypeBinding(node: ESTree.Node): {
 	return null;
 }
 
+/**
+ * Every node that declares a type binding contains one of these keywords in its own source
+ * range. Import specifiers are the exception; they are reached through their ImportDeclaration.
+ */
+const BINDING_KEYWORD = /\b(?:class|enum|import|interface|type)\b/g;
+
+type BindingCollection = {
+	readonly aliases: ESTree.TSTypeAliasDeclaration[];
+	readonly bindingsByName: Map<string, TypeBinding[]>;
+};
+
+function bindingKeywordOffsets(sourceText: string): number[] {
+	const offsets: number[] = [];
+	for (const match of sourceText.matchAll(BINDING_KEYWORD)) offsets.push(match.index);
+	return offsets;
+}
+
+/** Return whether a sorted offset list has an entry in `[start, end)`. */
+function hasOffsetInRange(offsets: readonly number[], start: number, end: number): boolean {
+	let low = 0;
+	let high = offsets.length;
+	while (low < high) {
+		const middle = (low + high) >>> 1;
+		if ((offsets[middle] ?? 0) < start) low = middle + 1;
+		else high = middle;
+	}
+	return low < offsets.length && (offsets[low] ?? end) < end;
+}
+
 function collectTypeBindings(
 	node: ESTree.Node,
 	visitorKeys: VisitorKeys,
-	bindingsByName: Map<string, TypeBinding[]>,
-	aliases: ESTree.TSTypeAliasDeclaration[],
+	offsets: readonly number[],
+	visitAll: boolean,
+	collection: BindingCollection,
 ): void {
 	const declared = declaredTypeBinding(node);
 	if (declared !== null) {
-		const bindings = bindingsByName.get(declared.name) ?? [];
+		const bindings = collection.bindingsByName.get(declared.name) ?? [];
 		bindings.push({ ...declared, scope: enclosingTypeScope(node) });
-		bindingsByName.set(declared.name, bindings);
-		if (declared.alias !== null) aliases.push(declared.alias);
+		collection.bindingsByName.set(declared.name, bindings);
+		if (declared.alias !== null) collection.aliases.push(declared.alias);
 	}
 
+	const visitChildren = visitAll || node.type === "ImportDeclaration";
 	// SAFETY: Oxlint's visitor keys identify only ESTree child-node properties.
 	const fields = node as unknown as Readonly<Record<string, unknown>>;
 	for (const key of visitorKeys[node.type] ?? []) {
 		const value = fields[key];
 		if (isNode(value)) {
-			collectTypeBindings(value, visitorKeys, bindingsByName, aliases);
+			if (visitChildren || hasOffsetInRange(offsets, value.start, value.end)) {
+				collectTypeBindings(value, visitorKeys, offsets, visitChildren, collection);
+			}
 			continue;
 		}
 		if (!Array.isArray(value)) continue;
 		for (const child of value) {
-			if (isNode(child)) {
-				collectTypeBindings(child, visitorKeys, bindingsByName, aliases);
+			if (
+				isNode(child) &&
+				(visitChildren || hasOffsetInRange(offsets, child.start, child.end))
+			) {
+				collectTypeBindings(child, visitorKeys, offsets, visitChildren, collection);
 			}
 		}
 	}
 }
 
-/** Collect every lexical type alias and competing type binding in a program. */
+function collectProgramTypeBindings(
+	program: ESTree.Program,
+	visitorKeys: VisitorKeys,
+	sourceText: string,
+): BindingCollection {
+	const collection: BindingCollection = { aliases: [], bindingsByName: new Map() };
+	const offsets = bindingKeywordOffsets(sourceText);
+	if (offsets.length > 0) {
+		collectTypeBindings(program, visitorKeys, offsets, false, collection);
+	}
+	return collection;
+}
+
+/** Collect every lexical type alias and competing type binding in a program, on first use. */
 export function createTypeAliasEnvironment(
 	program: ESTree.Program,
 	visitorKeys: VisitorKeys,
+	sourceText: string,
 ): TypeAliasEnvironment {
 	const cached = environmentsByProgram.get(program);
 	if (cached !== undefined) return cached;
-	const bindingsByName = new Map<string, TypeBinding[]>();
-	const aliases: ESTree.TSTypeAliasDeclaration[] = [];
-	collectTypeBindings(program, visitorKeys, bindingsByName, aliases);
-	const environment = { aliases, bindingsByName, visitorKeys };
+	let collection: BindingCollection | null = null;
+	const collected = (): BindingCollection =>
+		(collection ??= collectProgramTypeBindings(program, visitorKeys, sourceText));
+	const environment: TypeAliasEnvironment = {
+		get aliases() {
+			return collected().aliases;
+		},
+		get bindingsByName() {
+			return collected().bindingsByName;
+		},
+		visitorKeys,
+	};
 	environmentsByProgram.set(program, environment);
 	return environment;
 }

@@ -65,6 +65,7 @@ export const noUnknownReturnsRule = defineRule({
         environment = createTypeAliasEnvironment(
           node,
           context.sourceCode.visitorKeys,
+          context.sourceCode.text,
         );
       },
       ArrowFunctionExpression: checkReturnType,

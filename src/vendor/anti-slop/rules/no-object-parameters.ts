@@ -66,6 +66,7 @@ export const noObjectParametersRule = defineRule({
 				environment = createTypeAliasEnvironment(
 					node,
 					context.sourceCode.visitorKeys,
+					context.sourceCode.text,
 				);
 			},
 			ArrowFunctionExpression: checkParameters,

@@ -8,6 +8,8 @@ import {
   unwrapArrayExpression,
 } from "../shared/array-method.ts";
 
+const ARRAY_COPY_METHODS: readonly string[] = ["concat", "slice", "toSpliced", "toSorted", "toReversed", "with"];
+
 function enclosingReducer(node: ESTree.Node) {
   let parent = node.parent;
   while (parent !== null) {
@@ -78,6 +80,11 @@ export const noReduceAccumulatorCopyRule = defineRule({
       CallExpression(node) {
         const method = arrayMethodTarget(node.callee);
         if (method === null) return;
+        // Only these methods can copy an accumulator; skip the parent walk for every other call.
+        if (
+          method.name !== "assign" && method.name !== "from" &&
+          !ARRAY_COPY_METHODS.includes(method.name)
+        ) return;
         const reducer = enclosingReducer(node);
         if (reducer === null) return;
         const accumulator = context.sourceCode.getDeclaredVariables(reducer.callback).find(variable =>
@@ -96,7 +103,7 @@ export const noReduceAccumulatorCopyRule = defineRule({
         } else if (method.name === "from" && isGlobalCopyOwner(context.sourceCode, method.object, "Array")) {
           const source = node.arguments[0];
           copiesAccumulator = source !== undefined && isAccumulator(source);
-        } else if (["concat", "slice", "toSpliced", "toSorted", "toReversed", "with"].includes(method.name)) {
+        } else if (ARRAY_COPY_METHODS.includes(method.name)) {
           const initialValue = reducer.initialValue;
           const arrayAccumulator = initialValue !== undefined &&
             isKnownArrayExpression(context.sourceCode, initialValue);

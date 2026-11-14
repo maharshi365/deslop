@@ -57,6 +57,7 @@ function declaredStatement(statement: ESTree.Statement): ESTree.Node | null {
 export function createTypeEnvironment(
 	program: ESTree.Program,
 	visitorKeys: Readonly<Record<string, readonly string[]>>,
+	sourceText: string,
 ): TypeEnvironment {
 	const interfaces = new Map<string, ESTree.TSInterfaceDeclaration[]>();
 
@@ -70,7 +71,7 @@ export function createTypeEnvironment(
 
 	return {
 		interfaces,
-		typeAliases: createTypeAliasEnvironment(program, visitorKeys),
+		typeAliases: createTypeAliasEnvironment(program, visitorKeys, sourceText),
 	};
 }
 
