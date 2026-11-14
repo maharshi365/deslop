@@ -1,7 +1,9 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RuleTester } from "oxlint/plugins-dev";
-import { describe, it } from "vitest";
+import { afterAll, beforeAll, describe, it } from "vitest";
 
 import { noPoorSubstringTestsRule } from "../src/rules/no-poor-substring-tests.ts";
 
@@ -356,5 +358,133 @@ ruleTester.run("no-poor-substring-tests", noPoorSubstringTestsRule, {
 			`,
 			errors: [{ messageId: "poorSubstringTest" }],
 		},
+		{
+			name: "rejects imported constant string whose name contains a dollar sign",
+			filename: fixtureTestFile,
+			code: `
+				import { $PROMPT } from "./prompt.ts";
+				expect($PROMPT).toContain("assistant");
+			`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
+		{
+			name: "rejects imported constant string from a .js specifier for a .ts source",
+			filename: fixtureTestFile,
+			code: `
+				import { SYSTEM_PROMPT } from "./prompt.js";
+				expect(SYSTEM_PROMPT).toContain("assistant");
+			`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
+		{
+			name: "rejects imported constant string from a .js specifier for a .tsx source",
+			filename: fixtureTestFile,
+			code: `
+				import { VIEW_PROMPT } from "./view-prompt.js";
+				expect(VIEW_PROMPT).toContain("assistant");
+			`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
+		{
+			name: "rejects imported constant string from a .jsx specifier for a .tsx source",
+			filename: fixtureTestFile,
+			code: `
+				import { VIEW_PROMPT } from "./view-prompt.jsx";
+				expect(VIEW_PROMPT).toContain("assistant");
+			`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
+		{
+			name: "rejects imported constant string from a .mjs specifier for a .mts source",
+			filename: fixtureTestFile,
+			code: `
+				import { MODULE_PROMPT } from "./module-prompt.mjs";
+				expect(MODULE_PROMPT).toContain("assistant");
+			`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
+		{
+			name: "rejects imported constant string from a .cjs specifier for a .cts source",
+			filename: fixtureTestFile,
+			code: `
+				import { COMMON_PROMPT } from "./common-prompt.cjs";
+				expect(COMMON_PROMPT).toContain("assistant");
+			`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
+		{
+			name: "rejects imported constant string from an extensionless .mts source",
+			filename: fixtureTestFile,
+			code: `
+				import { MODULE_PROMPT } from "./module-prompt";
+				expect(MODULE_PROMPT).toContain("assistant");
+			`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
+		{
+			name: "rejects imported constant string from an extensionless .cts source",
+			filename: fixtureTestFile,
+			code: `
+				import { COMMON_PROMPT } from "./common-prompt";
+				expect(COMMON_PROMPT).toContain("assistant");
+			`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
+		{
+			name: "rejects imported constant string from an extensionless .jsx source",
+			filename: fixtureTestFile,
+			code: `
+				import { LEGACY_PROMPT } from "./legacy-prompt";
+				expect(LEGACY_PROMPT).toContain("assistant");
+			`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
 	].map((test) => ({ filename: testFile, ...test })),
+});
+
+describe("imported source changed on disk", () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "deslop-poor-substring-"));
+	const sourceFile = path.join(dir, "prompt.ts");
+	const importingTestFile = path.join(dir, "prompt.test.ts");
+	const code = `
+		import { PROMPT } from "./prompt.ts";
+		expect(PROMPT).toContain("assistant");
+	`;
+
+	afterAll(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	describe("while the export is a constant string", () => {
+		beforeAll(() => {
+			writeFileSync(sourceFile, `export const PROMPT = "You are a helpful assistant.";\n`);
+		});
+		ruleTester.run("no-poor-substring-tests", noPoorSubstringTestsRule, {
+			valid: [],
+			invalid: [
+				{
+					name: "rejects the constant string export",
+					filename: importingTestFile,
+					code,
+					errors: [{ messageId: "poorSubstringTest" }],
+				},
+			],
+		});
+	});
+
+	describe("after the export becomes dynamic", () => {
+		beforeAll(() => {
+			writeFileSync(sourceFile, `export const PROMPT = buildPrompt();\n`);
+		});
+		ruleTester.run("no-poor-substring-tests", noPoorSubstringTestsRule, {
+			valid: [
+				{
+					name: "re-reads the changed source instead of a stale cached copy",
+					filename: importingTestFile,
+					code,
+				},
+			],
+			invalid: [],
+		});
+	});
 });

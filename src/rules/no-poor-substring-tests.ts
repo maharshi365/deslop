@@ -49,7 +49,42 @@ const ASSERT_MATCHERS = new Set([
 	"notMatch",
 ]);
 
-const fileContentCache = new Map<string, string>();
+// Bounded, insertion-ordered cache. Entries are validated by mtime and size so that
+// long-lived processes (editor/LSP) see on-disk changes.
+const FILE_CONTENT_CACHE_LIMIT = 256;
+const fileContentCache = new Map<string, { mtimeMs: number; size: number; content: string }>();
+
+// TS ESM style: a `.js` specifier may refer to a `.ts` source file, etc.
+const SOURCE_EXTENSIONS_FOR_SPECIFIER: Record<string, Array<string>> = {
+	".js": [".ts", ".tsx"],
+	".jsx": [".tsx"],
+	".mjs": [".mts"],
+	".cjs": [".cts"],
+};
+
+function readCachedFile(filePath: string): string | undefined {
+	const stats = fs.statSync(filePath, { throwIfNoEntry: false });
+	if (!stats?.isFile()) {
+		fileContentCache.delete(filePath);
+		return undefined;
+	}
+	const cached = fileContentCache.get(filePath);
+	if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size) {
+		return cached.content;
+	}
+	const content = fs.readFileSync(filePath, "utf8");
+	fileContentCache.delete(filePath);
+	if (fileContentCache.size >= FILE_CONTENT_CACHE_LIMIT) {
+		const oldest = fileContentCache.keys().next().value;
+		if (oldest !== undefined) fileContentCache.delete(oldest);
+	}
+	fileContentCache.set(filePath, { mtimeMs: stats.mtimeMs, size: stats.size, content });
+	return content;
+}
+
+function escapeRegExp(text: string): string {
+	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function isTestFile(filename?: string): boolean {
 	if (!filename) return false;
@@ -105,40 +140,42 @@ function isImportedConstantString(variable: Variable, currentFilename?: string):
 		return false;
 	}
 
+	const importedName =
+		definition.node.type === "ImportSpecifier"
+			? definition.node.imported.type === "Identifier"
+				? definition.node.imported.name
+				: definition.node.imported.value
+			: definition.node.type === "ImportDefaultSpecifier"
+				? "default"
+				: null;
+
+	if (!importedName) return false;
+
 	const dir = path.dirname(currentFilename);
+	const specifierExtension = path.extname(source);
+	const stem = source.slice(0, source.length - specifierExtension.length);
 	const candidates = [
 		path.resolve(dir, source),
+		...(SOURCE_EXTENSIONS_FOR_SPECIFIER[specifierExtension] ?? []).map((extension) =>
+			path.resolve(dir, `${stem}${extension}`),
+		),
 		path.resolve(dir, `${source}.ts`),
 		path.resolve(dir, `${source}.tsx`),
+		path.resolve(dir, `${source}.mts`),
+		path.resolve(dir, `${source}.cts`),
 		path.resolve(dir, `${source}.js`),
+		path.resolve(dir, `${source}.jsx`),
 		path.resolve(dir, `${source}.mjs`),
 		path.resolve(dir, source, "index.ts"),
 		path.resolve(dir, source, "index.js"),
 	];
+	const pattern = new RegExp(`export\\s+const\\s+${escapeRegExp(importedName)}\\s*=\\s*(["'\`])`);
 
 	for (const candidate of candidates) {
 		try {
-			let content = fileContentCache.get(candidate);
-			if (content === undefined) {
-				if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) {
-					continue;
-				}
-				content = fs.readFileSync(candidate, "utf8");
-				fileContentCache.set(candidate, content);
-			}
+			const content = readCachedFile(candidate);
+			if (content === undefined) continue;
 
-			const importedName =
-				definition.node.type === "ImportSpecifier"
-					? definition.node.imported.type === "Identifier"
-						? definition.node.imported.name
-						: definition.node.imported.value
-					: definition.node.type === "ImportDefaultSpecifier"
-						? "default"
-						: null;
-
-			if (!importedName) continue;
-
-			const pattern = new RegExp(`export\\s+const\\s+${importedName}\\s*=\\s*(["'\`])`);
 			if (pattern.test(content)) {
 				return true;
 			}
@@ -297,15 +334,14 @@ export const noPoorSubstringTestsRule = defineRule({
 		schema: [],
 	},
 	createOnce(context) {
-		let shouldCheck = false;
-
 		return {
-			Program() {
-				shouldCheck = isTestFile(context.filename);
+			before() {
+				if (!isTestFile(context.filename)) return false;
+				// Every pattern needs an `expect` or `assert` callee. `\u` covers escaped identifiers.
+				const text = context.sourceCode.text;
+				return text.includes("expect") || text.includes("assert") || text.includes("\\u");
 			},
 			CallExpression(node) {
-				if (!shouldCheck) return;
-
 				// Pattern 1: expect(subject).toContain(sub), expect(subject).toMatch(regex), etc.
 				if (
 					node.callee.type === "MemberExpression" &&

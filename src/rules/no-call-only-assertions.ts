@@ -4,7 +4,13 @@ import type { ESTree } from "@oxlint/plugins";
 // Tests whose every assertion is a "was it called" mock check verify orchestration, not behavior.
 // `toHaveBeenCalledWith` is allowed because it asserts on real data.
 
-const CALL_ONLY_MATCHERS = new Set(["toHaveBeenCalled", "toHaveBeenCalledTimes", "toHaveBeenCalledOnce"]);
+const CALL_ONLY_MATCHERS = new Set([
+	"toHaveBeenCalled",
+	"toHaveBeenCalledTimes",
+	"toHaveBeenCalledOnce",
+	"toBeCalled",
+	"toBeCalledTimes",
+]);
 const TEST_NAMES = new Set(["it", "test"]);
 const MODIFIERS = new Set(["not", "resolves", "rejects"]);
 
@@ -45,6 +51,15 @@ function matcherName(node: ESTree.CallExpression): string | undefined {
 	return isExpectCall ? node.callee.property.name : undefined;
 }
 
+// `assert(...)`, `assert.equal(...)`, `assert.strict.equal(...)`: real assertions.
+function isAssertCall(node: ESTree.CallExpression): boolean {
+	let callee: ESTree.Expression = node.callee;
+	while (callee.type === "MemberExpression" && !callee.computed && callee.property.type === "Identifier") {
+		callee = callee.object;
+	}
+	return callee.type === "Identifier" && callee.name === "assert";
+}
+
 interface TestEntry {
 	node: ESTree.CallExpression;
 	total: number;
@@ -68,6 +83,9 @@ export const noCallOnlyAssertionsRule = defineRule({
 		return {
 			before() {
 				tests = [];
+				// Every call-only matcher name contains "Called". `\u` covers escaped identifiers.
+				const text = context.sourceCode.text;
+				return text.includes("Called") || text.includes("\\u");
 			},
 			CallExpression(node) {
 				if (isTestCall(node)) {
@@ -76,6 +94,10 @@ export const noCallOnlyAssertionsRule = defineRule({
 				}
 				const test = tests.at(-1);
 				if (!test) return;
+				if (isAssertCall(node)) {
+					test.total += 1;
+					return;
+				}
 				const matcher = matcherName(node);
 				if (!matcher) return;
 				test.total += 1;
