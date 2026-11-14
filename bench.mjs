@@ -16,6 +16,49 @@ const moduleDir = moduleArg === -1 ? path.join(root, "dist") : path.resolve(proc
 
 if (process.argv.includes("--project")) {
 	await import("./bench-project.mjs");
+} else if (process.argv.includes("--rules")) {
+	// End-to-end Oxlint wall time: all non-Tailwind rules vs. one cheap rule (JS plugin fixed cost).
+	const copies = 30;
+	const plugin = (await import(pathToFileURL(path.join(moduleDir, "index.js")))).default;
+	const skipped = ["canonical-class-names", "no-restricted-syntax", "no-constant-substring-tests"];
+	const names = Object.keys(plugin.rules).filter(name => !skipped.includes(name));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deslop-bench-rules-"));
+	try {
+		for (let i = 0; i < copies; i++) {
+			for (const source of ["src", "tests"]) fs.cpSync(path.join(root, source), path.join(dir, `c${i}`, source), { recursive: true });
+		}
+		const fileCount = fs.readdirSync(dir, { recursive: true }).filter(file => /\.[cm]?[jt]sx?$/.test(file)).length;
+		const measure = (label, ruleNames) => {
+			const config = path.join(dir, `${label}.json`);
+			fs.writeFileSync(config, JSON.stringify({
+				jsPlugins: [path.join(moduleDir, "index.js").replaceAll("\\", "/")],
+				categories: { correctness: "off" },
+				rules: Object.fromEntries(ruleNames.map(name => [`deslop/${name}`, "error"])),
+			}));
+			const times = [];
+			for (let i = 0; i < 5; i++) {
+				const start = performance.now();
+				const child = spawnSync(process.execPath, [path.join(root, "node_modules/oxlint/bin/oxlint"), "--config", config, "--threads=1", dir], { stdio: "ignore" });
+				if (child.error || child.status === null || child.status > 1) throw child.error ?? new Error(`Oxlint exited ${child.status}`);
+				times.push(performance.now() - start);
+			}
+			return times.sort((a, b) => a - b)[2];
+		};
+		const baseMs = measure("base", ["max-boolean-conditions"]);
+		const allMs = measure("all", names);
+		const result = { node: process.version, scenario: "rules", files: fileCount, rules: names.length, baseMs, allMs, rulesMs: allMs - baseMs };
+		const compare = process.argv.indexOf("--compare");
+		const baseline = compare === -1 ? null : JSON.parse(fs.readFileSync(process.argv[compare + 1], "utf8"));
+		if (baseline) assert.equal(baseline.scenario, result.scenario, "Compare the same benchmark scenario");
+		console.log(`Rules benchmark: ${names.length} rules, ${fileCount.toLocaleString()} files, 1 thread; median of 5 Oxlint runs`);
+		for (const key of ["baseMs", "allMs", "rulesMs"]) {
+			console.log(`${key}: ${result[key].toFixed(0)} ms${baseline ? ` (${(baseline[key] / result[key]).toFixed(2)}x faster)` : ""}`);
+		}
+		const save = process.argv.indexOf("--save");
+		if (save !== -1) fs.writeFileSync(process.argv[save + 1], JSON.stringify(result, null, 2) + "\n");
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
 } else if (process.argv.includes("--child")) {
 	const { canonicalClassNames } = await import(pathToFileURL(path.join(moduleDir, "tailwind/rule.js")));
 	const preferredTemp = path.join(os.tmpdir(), "opencode");
