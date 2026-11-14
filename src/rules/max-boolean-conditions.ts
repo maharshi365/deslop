@@ -6,6 +6,20 @@ interface Options {
 	message?: string;
 }
 
+function countRawTerms(node: ESTree.Expression): number {
+	const pending = [node];
+	let count = 0;
+	while (pending.length > 0) {
+		const term = pending.pop()!;
+		if (term.type === "LogicalExpression" && term.operator !== "??") {
+			pending.push(term.left, term.right);
+		} else {
+			count++;
+		}
+	}
+	return count;
+}
+
 /** Limit top-level Boolean terms in control-flow conditions. */
 export const maxBooleanConditionsRule = defineRule({
 	meta: {
@@ -29,6 +43,10 @@ export const maxBooleanConditionsRule = defineRule({
 		function checkCondition(node: ESTree.IfStatement | ESTree.WhileStatement | ESTree.DoWhileStatement | ESTree.ForStatement) {
 			if (node.test === null) return;
 
+			// Grouping can only merge terms, so skip token reads when the ungrouped count fits.
+			const max = options.maxConditions ?? 3;
+			if (countRawTerms(node.test) <= max) return;
+
 			const pending = [node.test];
 			let count = 0;
 			while (pending.length > 0) {
@@ -43,7 +61,6 @@ export const maxBooleanConditionsRule = defineRule({
 				}
 			}
 
-			const max = options.maxConditions ?? 3;
 			if (count <= max) return;
 			if (options.message !== undefined) {
 				context.report({ node: node.test, message: options.message });

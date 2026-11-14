@@ -13,7 +13,7 @@ interface RuleOptions {
 	schemas?: { libraries?: string[]; matchTypes?: boolean };
 	drizzle?: { models?: DrizzleModel[]; matchTypes?: boolean };
 }
-interface SeenType { node: ReportNode; name: string; filename: string; }
+interface SeenType { start: number; name: string; filename: string; }
 
 const drizzleColumnTypes: Record<string, string> = {
 	text: "TSStringKeyword", varchar: "TSStringKeyword", uuid: "TSStringKeyword", char: "TSStringKeyword",
@@ -30,7 +30,7 @@ export const noDuplicateTypesRule = defineRule({
 		schema: [{ type: "object", properties: { message: { type: "string" }, minProperties: { type: "integer", minimum: 0 }, schemas: { type: "object", properties: { libraries: { type: "array", items: { enum: ["zod", "valibot", "arktype"] } }, matchTypes: { type: "boolean" } }, additionalProperties: false }, drizzle: { type: "object", properties: { models: { type: "array", items: { enum: ["select", "insert"] } }, matchTypes: { type: "boolean" } }, additionalProperties: false } }, additionalProperties: false }],
 	},
 	createOnce(context) {
-		const seen = new Map<string, SeenType>();
+		const seen = new Map<string, SeenType>(), seenKeysByFile = new Map<string, string[]>();
 		const zodNamespaces = new Set<string>(), valibotNamespaces = new Set<string>(), arkTypeFunctions = new Set<string>();
 		const valibotFunctions = new Map<string, string>(), drizzleTables = new Set<string>(), drizzleSchemaFactories = new Set<string>(), drizzleSchemaObjects = new Set<string>();
 		const drizzleBuilders = new Map<string, DrizzleBuilder>(), drizzleModels = new Map<string, Map<DrizzleModel, string>>();
@@ -42,8 +42,14 @@ export const noDuplicateTypesRule = defineRule({
 		const report = (node: ReportNode, name: string, fingerprint: string, kind: DuplicateKind) => {
 			const isolates = kind === "schema" ? options.schemas?.matchTypes === false : kind.startsWith("drizzle-") && options.drizzle?.matchTypes === false;
 			const key = isolates ? `${kind}:${fingerprint}` : fingerprint, first = seen.get(key);
-			if (first === undefined) { seen.set(key, { node, name, filename: context.filename }); return; }
-			if (first.node !== node) context.report({ node, messageId: "duplicate", data: { message: options.message ?? "This type is structurally identical to an existing declaration.", firstName: first.name, firstFile: first.filename } });
+			if (first === undefined) {
+				seen.set(key, { start: node.start, name, filename: context.filename });
+				const keys = seenKeysByFile.get(context.filename);
+				if (keys === undefined) seenKeysByFile.set(context.filename, [key]); else keys.push(key);
+				return;
+			}
+			// The same declarator can produce one fingerprint for several Drizzle models.
+			if (first.filename !== context.filename || first.start !== node.start) context.report({ node, messageId: "duplicate", data: { message: options.message ?? "This type is structurally identical to an existing declaration.", firstName: first.name, firstFile: first.filename } });
 		};
 		const inspectType = (node: TypeDeclaration) => {
 			const properties = node.type === "TSTypeAliasDeclaration" ? node.typeAnnotation.type === "TSTypeLiteral" ? node.typeAnnotation.members.length : 0 : node.body.body.length;
@@ -51,7 +57,9 @@ export const noDuplicateTypesRule = defineRule({
 			if (fingerprint !== null && properties >= minProperties()) report(node, node.id.name, fingerprint, "type");
 		};
 		const inspectSchema = (node: ESTree.VariableDeclarator) => {
-			if (node.id.type !== "Identifier" || node.init === null) return;
+			// Every schema form is a call, and needs a library binding imported earlier in the file.
+			if (node.id.type !== "Identifier" || node.init?.type !== "CallExpression") return;
+			if (zodNamespaces.size === 0 && valibotNamespaces.size === 0 && valibotFunctions.size === 0 && !hasArkTypeImport) return;
 			const zod = memberCall(node.init);
 			const valibot = factoryCall(node.init, valibotNamespaces, valibotFunctions);
 			const arkCallee = node.init.type === "CallExpression" ? node.init.callee as { name?: unknown } : null;
@@ -62,7 +70,7 @@ export const noDuplicateTypesRule = defineRule({
 			if (schema !== null && schema.properties >= minProperties()) report(node, node.id.name, schema.fingerprint, "schema");
 		};
 		const inspectDrizzle = (node: ESTree.VariableDeclarator) => {
-			if (options.drizzle === undefined || node.id.type !== "Identifier" || node.init === null) return;
+			if (options.drizzle === undefined || node.id.type !== "Identifier" || node.init?.type !== "CallExpression" || drizzleTables.size === 0 && drizzleSchemaObjects.size === 0) return;
 			const models = new Map<DrizzleModel, string>();
 			for (const model of options.drizzle.models ?? ["select", "insert"]) {
 				const table = canonicalDrizzleTable(node.init, drizzleTables, drizzleSchemaObjects, drizzleBuilders, model);
@@ -72,9 +80,11 @@ export const noDuplicateTypesRule = defineRule({
 			if (models.size > 0) drizzleModels.set(node.id.name, models);
 		};
 		const trackImport = (node: ESTree.ImportDeclaration) => {
-			if (node.source.value === "zod") for (const specifier of node.specifiers) if (specifier.type === "ImportNamespaceSpecifier" || specifier.type === "ImportDefaultSpecifier" || specifier.type === "ImportSpecifier" && specifier.imported.type === "Identifier" && specifier.imported.name === "z") zodNamespaces.add(specifier.local.name);
-			if (node.source.value === "valibot") for (const specifier of node.specifiers) { if (specifier.type === "ImportNamespaceSpecifier") valibotNamespaces.add(specifier.local.name); if (specifier.type === "ImportSpecifier" && specifier.imported.type === "Identifier") valibotFunctions.set(specifier.local.name, specifier.imported.name); }
-			if (node.source.value === "arktype") { hasArkTypeImport = true; for (const specifier of node.specifiers) { const imported = specifier.type === "ImportSpecifier" ? specifier.imported as { name?: unknown } : null; if (imported?.name === "type") arkTypeFunctions.add(specifier.local.name); } }
+			// Only track bindings for enabled detectors; the inspectors read nothing else.
+			if (node.source.value === "zod" && enabled("zod")) for (const specifier of node.specifiers) if (specifier.type === "ImportNamespaceSpecifier" || specifier.type === "ImportDefaultSpecifier" || specifier.type === "ImportSpecifier" && specifier.imported.type === "Identifier" && specifier.imported.name === "z") zodNamespaces.add(specifier.local.name);
+			if (node.source.value === "valibot" && enabled("valibot")) for (const specifier of node.specifiers) { if (specifier.type === "ImportNamespaceSpecifier") valibotNamespaces.add(specifier.local.name); if (specifier.type === "ImportSpecifier" && specifier.imported.type === "Identifier") valibotFunctions.set(specifier.local.name, specifier.imported.name); }
+			if (node.source.value === "arktype" && enabled("arktype")) { hasArkTypeImport = true; for (const specifier of node.specifiers) { const imported = specifier.type === "ImportSpecifier" ? specifier.imported as { name?: unknown } : null; if (imported?.name === "type") arkTypeFunctions.add(specifier.local.name); } }
+			if (options.drizzle === undefined) return;
 			const source = /^drizzle-orm\/(pg|mysql|sqlite)-core$/.exec(String(node.source.value));
 			if (source === null) return;
 			for (const specifier of node.specifiers) {
@@ -89,14 +99,15 @@ export const noDuplicateTypesRule = defineRule({
 		return {
 			Program() {
 				// LSPs can re-lint a file in the same createOnce worker; discard its stale declarations first.
-				for (const [key, type] of seen) if (type.filename === context.filename) seen.delete(key);
+				for (const key of seenKeysByFile.get(context.filename) ?? []) seen.delete(key);
+				seenKeysByFile.delete(context.filename);
 				options = (context.options[0] as RuleOptions | undefined) ?? {};
 				zodNamespaces.clear(); valibotNamespaces.clear(); arkTypeFunctions.clear(); valibotFunctions.clear();
 				drizzleTables.clear(); drizzleSchemaFactories.clear(); drizzleSchemaObjects.clear(); drizzleBuilders.clear(); drizzleModels.clear(); drizzleAliases.length = 0;
 				hasArkTypeImport = false;
 			},
 			ImportDeclaration: trackImport,
-			TSTypeAliasDeclaration(node) { inspectType(node); drizzleAliases.push(node); },
+			TSTypeAliasDeclaration(node) { inspectType(node); if (options.drizzle !== undefined) drizzleAliases.push(node); },
 			TSInterfaceDeclaration: inspectType,
 			VariableDeclarator(node) {
 				inspectSchema(node);

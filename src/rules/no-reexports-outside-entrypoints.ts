@@ -8,6 +8,8 @@ interface Options {
 	entrypoints?: string[];
 }
 
+const defaultEntrypoints = ["**/index.ts", "**/index.tsx", "**/index.mts", "**/index.cts", "**/index.js", "**/index.jsx", "**/index.mjs"];
+
 /** Keep re-exports in explicitly allowed entrypoint files. */
 export const noReexportsOutsideEntrypointsRule = defineRule({
 	meta: {
@@ -29,28 +31,37 @@ export const noReexportsOutsideEntrypointsRule = defineRule({
 			return resolveVariable(context.sourceCode, node)?.defs.some((definition) => definition.type === "ImportBinding") ?? false;
 		}
 
-		return {
-			before() {
+		// Most files have no re-exports, so match the entrypoint globs only on the first one.
+		let entrypoint: boolean | undefined;
+		function isEntrypoint(): boolean {
+			if (entrypoint === undefined) {
 				const options = context.options[0] as Options | undefined;
 				const filename = relative(context.cwd, context.filename).replaceAll("\\", "/");
-				return !(options?.entrypoints ?? ["**/index.ts"]).some((pattern) => matchesGlob(filename, pattern));
+				entrypoint = (options?.entrypoints ?? defaultEntrypoints).some((pattern) => matchesGlob(filename, pattern));
+			}
+			return entrypoint;
+		}
+
+		return {
+			before() {
+				entrypoint = undefined;
 			},
 			ExportNamedDeclaration(node) {
 				if (node.source !== null) {
-					context.report({ node, messageId: "reexport" });
+					if (!isEntrypoint()) context.report({ node, messageId: "reexport" });
 					return;
 				}
 				for (const specifier of node.specifiers) {
-					if (specifier.local.type === "Identifier" && isImported(specifier.local)) {
+					if (specifier.local.type === "Identifier" && isImported(specifier.local) && !isEntrypoint()) {
 						context.report({ node: specifier, messageId: "reexport" });
 					}
 				}
 			},
 			ExportAllDeclaration(node) {
-				context.report({ node, messageId: "reexport" });
+				if (!isEntrypoint()) context.report({ node, messageId: "reexport" });
 			},
 			ExportDefaultDeclaration(node) {
-				if (node.declaration.type === "Identifier" && isImported(node.declaration)) {
+				if (node.declaration.type === "Identifier" && isImported(node.declaration) && !isEntrypoint()) {
 					context.report({ node, messageId: "reexport" });
 				}
 			},

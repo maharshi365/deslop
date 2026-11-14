@@ -44,10 +44,12 @@ export const noDuplicateConstsRule = defineRule({
 	},
 	createOnce(context) {
 		const seen = new Map<string, SeenConst>();
+		const seenKeysByFile = new Map<string, string[]>();
 		return {
 			Program() {
 				// LSPs can re-lint a file in the same worker; discard stale entries first.
-				for (const [key, constant] of seen) if (constant.filename === context.filename) seen.delete(key);
+				for (const key of seenKeysByFile.get(context.filename) ?? []) seen.delete(key);
+				seenKeysByFile.delete(context.filename);
 			},
 			VariableDeclaration(node) {
 				if (node.kind !== "const") return;
@@ -58,6 +60,9 @@ export const noDuplicateConstsRule = defineRule({
 					const key = `${declaration.id.name}:${value}`, first = seen.get(key);
 					if (first === undefined) {
 						seen.set(key, { filename: context.filename, name: declaration.id.name });
+						const keys = seenKeysByFile.get(context.filename);
+						if (keys === undefined) seenKeysByFile.set(context.filename, [key]);
+						else keys.push(key);
 					} else if (first.filename !== context.filename) {
 						context.report({ node: declaration, messageId: "duplicate", data: { name: declaration.id.name, firstFile: first.filename } });
 					}

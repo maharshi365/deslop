@@ -13,9 +13,20 @@ function isForwardedTypeParameter(
 	);
 }
 
+function typeNameText(node: ESTree.TSTypeName): string | null {
+	if (node.type === "Identifier") return node.name;
+	if (node.type !== "TSQualifiedName") return null;
+	const left = typeNameText(node.left);
+	return left === null ? null : `${left}.${node.right.name}`;
+}
+
 function passThroughTargetName(node: ESTree.TSTypeAliasDeclaration): string | null {
 	const annotation = node.typeAnnotation;
-	if (annotation.type !== "TSTypeReference" || annotation.typeName.type !== "Identifier") {
+	if (annotation.type !== "TSTypeReference") {
+		return null;
+	}
+	const typeName = typeNameText(annotation.typeName);
+	if (typeName === null) {
 		return null;
 	}
 
@@ -24,7 +35,7 @@ function passThroughTargetName(node: ESTree.TSTypeAliasDeclaration): string | nu
 	const isPassThrough =
 		typeParameters.length === typeArguments.length &&
 		typeParameters.every((typeParameter, index) => isForwardedTypeParameter(typeArguments[index], typeParameter));
-	return isPassThrough ? annotation.typeName.name : null;
+	return isPassThrough ? typeName : null;
 }
 
 /** Disallow type aliases that only rename another type. */

@@ -74,7 +74,9 @@ export const noPassThroughSchemaRule = defineRule({
 	createOnce(context) {
 		let options: Options;
 		const candidates: ESTree.VariableDeclarator[] = [];
-		const exported = new Set<Variable>();
+		// Export identifiers are resolved to variables only when an alias needs the check.
+		const exportedNames: Array<ESTree.Node & { name: string }> = [];
+		let exported: Set<Variable> | null = null;
 
 		function variableFor(node: ESTree.Node & { name: string }): Variable | null {
 			let scope = context.sourceCode.getScope(node);
@@ -140,15 +142,26 @@ export const noPassThroughSchemaRule = defineRule({
 		}
 
 		function markExport(node: ESTree.Node & { name: string }) {
-			const variable = variableFor(node);
-			if (variable !== null) exported.add(variable);
+			exportedNames.push(node);
+		}
+
+		function exportedVariables(): Set<Variable> {
+			if (exported === null) {
+				exported = new Set();
+				for (const node of exportedNames) {
+					const variable = variableFor(node);
+					if (variable !== null) exported.add(variable);
+				}
+			}
+			return exported;
 		}
 
 		return {
 			before() {
 				options = (context.options[0] as Options | undefined) ?? {};
 				candidates.length = 0;
-				exported.clear();
+				exportedNames.length = 0;
+				exported = null;
 			},
 			VariableDeclarator(node) {
 				if (node.parent.type === "VariableDeclaration" && node.parent.kind === "const" && node.id.type === "Identifier" && node.init?.type === "Identifier") candidates.push(node);
@@ -170,7 +183,7 @@ export const noPassThroughSchemaRule = defineRule({
 					const target = kind(node.init);
 					if (target !== "schema" && target !== "zod-schema" && target !== "ark-schema") continue;
 					const variable = variableFor(node.id);
-					if (options.allowExportedAliases && variable !== null && exported.has(variable)) continue;
+					if (options.allowExportedAliases && variable !== null && exportedVariables().has(variable)) continue;
 					context.report({ node, messageId: "passThroughSchema", data: { schemaName: node.init.name } });
 				}
 			},

@@ -19,6 +19,11 @@ ruleTester.run("no-reexports-outside-entrypoints", noReexportsOutsideEntrypoints
 	valid: [
 		{ filename: path.resolve("index.ts"), code: "export * from './foo';" },
 		{ filename: path.resolve("src/nested/index.ts"), code: "import type { Foo } from './foo'; export type { Foo };" },
+		...["src/index.tsx", "src/index.mts", "src/index.cts", "lib/index.js", "lib/index.jsx", "lib/index.mjs"].map((entrypoint) => ({
+			name: `allows ${entrypoint} as a default entrypoint`,
+			filename: path.resolve(entrypoint),
+			code: "export * from './foo';",
+		})),
 		{ filename: path.resolve("src/client.ts"), options: [{ entrypoints: ["src/client.ts"] }], code: "export { Foo } from './foo';" },
 		{ filename: path.resolve("packages/ui/src/server.ts"), options: [{ entrypoints: ["packages/*/src/{client,server}.ts"] }], code: "export * from './foo';" },
 		{ filename: path.resolve("src/feature.tsx"), code: "export function run() {} export class Foo {} export interface Options {} export type Name = string; export const Button = () => <div />;" },
@@ -62,7 +67,8 @@ ruleTester.run("no-reexports-outside-entrypoints", noReexportsOutsideEntrypoints
 			code: "export * from './foo';",
 			errors,
 		},
-		{ filename: path.resolve("src/index.tsx"), code: "export * from './foo';", errors },
+		{ filename: path.resolve("src/index.d.ts"), code: "export * from './foo';", errors },
+		{ filename: path.resolve("src/index.test.tsx"), code: "export * from './foo';", errors },
 	],
 });
 
