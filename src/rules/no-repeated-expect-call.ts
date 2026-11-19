@@ -115,7 +115,9 @@ export const noRepeatedExpectCallRule = defineRule({
 		}
 		return {
 			before() {
-				return TEST_FILE.test(context.filename);
+				if (!TEST_FILE.test(context.filename)) return false;
+				const text = context.sourceCode.text;
+				return text.includes("expect") || text.includes("\\u");
 			},
 			Program: checkStatements,
 			BlockStatement: checkStatements,

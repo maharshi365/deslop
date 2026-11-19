@@ -138,6 +138,12 @@ ruleTester.run("no-poor-substring-tests", noPoorSubstringTestsRule, {
 	],
 	invalid: [
 		{
+			name: "checks a substring argument when the matched assertion subject is dynamic",
+			filename: testFile,
+			code: `expect(result).toContain("constant".includes("const"));`,
+			errors: [{ messageId: "poorSubstringTest" }],
+		},
+		{
 			name: "rejects toContain on direct string literal",
 			code: `expect("The quick brown fox").toContain("brown");`,
 			errors: [{ messageId: "poorSubstringTest" }],

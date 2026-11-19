@@ -1,6 +1,6 @@
 import { defineRule } from "@oxlint/plugins";
 
-import { arrayMethodName, arrayMethodTarget, isKnownArrayExpression, unwrapArrayExpression } from "../shared/array-method.ts";
+import { arrayMethodName, isKnownArrayExpression, unwrapArrayExpression } from "../shared/array-method.ts";
 
 /** Reject eager array filter/map pipelines; lazy iterator helpers remain allowed. */
 export const noArrayFilterMapRule = defineRule({
@@ -13,16 +13,24 @@ export const noArrayFilterMapRule = defineRule({
   },
   createOnce(context) {
     return {
+      before() {
+        const text = context.sourceCode.text;
+        // Computed method strings and identifiers can both contain escapes.
+        return (text.includes("map") && text.includes("filter")) || text.includes("\\");
+      },
       CallExpression(node) {
-        const name = arrayMethodName(node.callee);
-        if (name !== "map" && name !== "filter") return;
-        const outer = arrayMethodTarget(node.callee)!;
+        const outer = unwrapArrayExpression(node.callee);
+        if (outer.type !== "MemberExpression") return;
+        const second = arrayMethodName(outer);
+        if (second !== "map" && second !== "filter") return;
         const innerCall = unwrapArrayExpression(outer.object);
         if (innerCall.type !== "CallExpression") return;
-        const inner = arrayMethodTarget(innerCall.callee);
-        if (inner === null || inner.name !== (outer.name === "map" ? "filter" : "map")) return;
+        const inner = unwrapArrayExpression(innerCall.callee);
+        if (inner.type !== "MemberExpression") return;
+        const first = second === "map" ? "filter" : "map";
+        if (arrayMethodName(inner) !== first) return;
         if (!isKnownArrayExpression(context.sourceCode, inner.object)) return;
-        context.report({ node, messageId: "arrayFilterMap", data: { first: inner.name, second: outer.name } });
+        context.report({ node, messageId: "arrayFilterMap", data: { first, second } });
       },
     };
   },

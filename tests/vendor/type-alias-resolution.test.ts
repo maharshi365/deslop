@@ -8,6 +8,7 @@ import { describe, it } from "vitest";
 
 import {
 	createTypeAliasEnvironment,
+	enclosingTypeScope,
 	resetTypeAliasEnvironment,
 	typeBindingVisitors,
 	type TypeAliasEnvironment,
@@ -17,9 +18,7 @@ RuleTester.describe = describe;
 RuleTester.it = it;
 
 type VisitorKeys = Readonly<Record<string, readonly string[]>>;
-type Binding = TypeAliasEnvironment["bindingsByName"] extends ReadonlyMap<string, readonly (infer T)[]>
-	? T
-	: never;
+type Binding = { readonly alias: ESTree.TSTypeAliasDeclaration | null; readonly scope: ESTree.Node };
 type OldBinding = Binding & { readonly name: string };
 
 // Copy of the original full-AST walk. The bindings rule visitors record must be identical.
@@ -116,8 +115,17 @@ function sameBindings(
 function compareCollections(program: ESTree.Program, visitorKeys: VisitorKeys, environment: TypeAliasEnvironment) {
 	const expectedBindings = new Map<string, OldBinding[]>();
 	oldCollectTypeBindings(program, visitorKeys, expectedBindings);
-	const same = sameBindings(expectedBindings, environment.bindingsByName);
-	const names = [...environment.bindingsByName]
+	const actualBindings = new Map<string, Binding[]>();
+	for (const [name, head] of environment.headByName) {
+		const bindings: Binding[] = [];
+		for (let index = head >>> 1; index !== -1; index = environment.next[index]) {
+			const declaration = environment.declarations[index];
+			bindings.push({ alias: declaration.type === "TSTypeAliasDeclaration" ? declaration : null, scope: enclosingTypeScope(declaration) });
+		}
+		actualBindings.set(name, bindings.reverse());
+	}
+	const same = sameBindings(expectedBindings, actualBindings);
+	const names = [...actualBindings]
 		.flatMap(([name, bindings]) => bindings.map((binding) => `${name}${binding.alias === null ? "" : "="}@${binding.scope.type}`))
 		.join(",");
 	return { same, names };

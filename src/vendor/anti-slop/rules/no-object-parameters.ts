@@ -71,6 +71,8 @@ export const noObjectParametersRule = defineRule({
 		return {
 			...typeBindingVisitors(environment),
 			before() {
+				const text = context.sourceCode.text;
+				if (!text.includes("object") && !text.includes("\\u")) return false;
 				resetTypeAliasEnvironment(environment, context.sourceCode.visitorKeys);
 				owners.length = 0;
 			},

@@ -28,6 +28,7 @@ function onlyDeclaration(declarations: TypeDeclarations, name: string): TypeDecl
 }
 
 const EQUALITY_OPERATORS = new Set(["===", "!==", "==", "!="]);
+const NO_EXTRAS: readonly string[] = [];
 
 function stringLiteralValue(node: ESTree.Node | null): string | null {
 	if (node === null) return null;
@@ -39,8 +40,8 @@ function stringLiteralValue(node: ESTree.Node | null): string | null {
 }
 
 /** Return the non-string members of a `string`, `string | null`, or `string | undefined` type, or null for any other type. */
-function nullableStringExtras(type: ESTree.TSType): string[] | null {
-	if (type.type === "TSStringKeyword") return [];
+function nullableStringExtras(type: ESTree.TSType): readonly string[] | null {
+	if (type.type === "TSStringKeyword") return NO_EXTRAS;
 	if (type.type !== "TSUnionType") return null;
 	let hasString = false;
 	const extras: string[] = [];
@@ -217,6 +218,7 @@ export const preferLiteralUnionRule = defineRule({
 			const firstLiteral = new Map<string, string | null>();
 			for (let i = 0; i < subjects.length; i++) {
 				const name = subjects[i].name;
+				if (!typedNames.has(name)) continue;
 				const first = firstLiteral.get(name);
 				// `null` marks a name with two or more distinct literals.
 				if (first === undefined) firstLiteral.set(name, literalsOf[i]);
@@ -224,7 +226,7 @@ export const preferLiteralUnionRule = defineRule({
 			}
 			const comparisons: Comparisons = new Map();
 			for (let i = 0; i < subjects.length; i++) {
-				if (firstLiteral.get(subjects[i].name) !== null || !typedNames.has(subjects[i].name)) continue;
+				if (firstLiteral.get(subjects[i].name) !== null) continue;
 				const variable = resolveVariable(context.sourceCode, subjects[i]);
 				if (variable === null) continue;
 				const literals = comparisons.get(variable);
@@ -240,6 +242,12 @@ export const preferLiteralUnionRule = defineRule({
 
 		return {
 			before() {
+				// A report needs an explicit string type and either an equality or a switch.
+				const text = context.sourceCode.text;
+				if (!text.includes("\\u") &&
+					(!text.includes("string") || (!text.includes("==") && !text.includes("!=") && !text.includes("switch")))) {
+					return false;
+				}
 				subjects.length = 0;
 				literalsOf.length = 0;
 				typedNames.clear();
@@ -250,11 +258,14 @@ export const preferLiteralUnionRule = defineRule({
 			FunctionExpression: addParameterNames,
 			ArrowFunctionExpression: addParameterNames,
 			VariableDeclarator(node) {
-				addTypedNames(node.id, typedNames);
+				const pattern = node.id;
+				addTypedNames(pattern, typedNames);
+				if (pattern.type !== "ArrayPattern") return;
+				const first = pattern.elements[0];
+				if (first?.type !== "Identifier") return;
 				const state = node.init;
-				const first = node.id.type === "ArrayPattern" ? node.id.elements[0] : null;
 				const type = state?.type === "CallExpression" && isUseStateCallee(state.callee) ? state.typeArguments?.params[0] : undefined;
-				if (first?.type === "Identifier" && type !== undefined && nullableStringExtras(type) !== null) typedNames.add(first.name);
+				if (type !== undefined && nullableStringExtras(type) !== null) typedNames.add(first.name);
 			},
 			BinaryExpression(node) {
 				if (!EQUALITY_OPERATORS.has(node.operator)) return;
@@ -282,7 +293,7 @@ export const preferLiteralUnionRule = defineRule({
 			ImportDefaultSpecifier: addLocalName,
 			ImportNamespaceSpecifier: addLocalName,
 			"Program:exit"() {
-				if (subjects.length < 2) return;
+				if (subjects.length < 2 || typedNames.size === 0) return;
 				for (const [variable, literalSet] of resolveComparisons()) {
 					if (literalSet.size < 2) continue;
 					const declaration = declaredType(variable, typeDeclarations);

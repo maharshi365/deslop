@@ -59,5 +59,13 @@ tester.run("no-call-only-assertions", noCallOnlyAssertionsRule, {
 			code: `it("saves", () => { save(); expect(store.save).toBeCalled(); expect(store.flush).not.toHaveBeenCalledTimes(2); });`,
 			errors: [error],
 		},
+		{
+			name: "reports a nested call-only test even after its parent made a value assertion",
+			code: `test("outer", () => {
+	expect(store.size).toBe(1);
+	test("inner", () => { expect(store.save).toBeCalled(); });
+});`,
+			errors: [{ ...error, line: 3 }],
+		},
 	],
 });

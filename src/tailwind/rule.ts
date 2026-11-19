@@ -69,12 +69,9 @@ export const canonicalClassNames = defineRule({
 		}
 
 		function post(end: number) {
-			if (posted === 0) {
-				file = cssFile();
-				// Pick up CSS changes once per file, before its first strings.
-				loadDesignSystem(file);
-			}
-			postClassValues(file, values.slice(posted, end), rem);
+			const first = posted === 0;
+			if (first) file = cssFile();
+			postClassValues(file, values.slice(posted, end), rem, first);
 			chunkEnds.push(end);
 			posted = end;
 			outstanding++;

@@ -149,6 +149,8 @@ export const noModuleMockingRule = defineRule({
       before() {
         calls.length = 0;
         objects.length = 0;
+        const text = context.sourceCode.text;
+        return text.includes("mock") || text.includes("Mock") || text.includes("\\");
       },
       CallExpression(node) {
         if (node.callee.type === "Super" || node.callee.type === "V8IntrinsicExpression") return;

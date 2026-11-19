@@ -32,14 +32,13 @@ it("uses the root font size for rem normalization", async () => {
 	expect(await handle({ type: "canonicalize", cssFile, rem: 20, values })).toEqual([["mt-4", "mt-[20px]", "mt-4", 1]]);
 });
 
-it("reloads the design system on a load job after its CSS file changes", async () => {
+it("refreshes the design system before the first batch for a file", async () => {
 	const handle = createJobHandler();
 	const values = ["mt-[16px]"];
 	expect(await handle({ type: "canonicalize", cssFile, rem: 16, values })).toEqual([["mt-4", "mt-[16px]", "mt-4", 1]]);
 	fs.appendFileSync(cssFile, "@theme { --spacing: 0.5rem; }\n");
 	fs.utimesSync(cssFile, new Date(), new Date(Date.now() + 10_000));
-	await handle({ type: "load", cssFile });
-	expect(await handle({ type: "canonicalize", cssFile, rem: 16, values })).toEqual([["mt-2", "mt-[16px]", "mt-2", 1]]);
+	expect(await handle({ type: "canonicalize", cssFile, rem: 16, values, refresh: true })).toEqual([["mt-2", "mt-[16px]", "mt-2", 1]]);
 });
 
 it("returns null while the CSS file cannot be loaded, including after it is deleted", async () => {

@@ -8,12 +8,11 @@ import { optimizeDesignSystem } from "./optimize-system.ts";
 type DesignSystem = Awaited<ReturnType<typeof __unstable__loadDesignSystem>>;
 
 /**
- * `load` (re)loads a design system when its CSS file changed. `canonicalize` uses the loaded one,
- * and loads it first if needed; the main thread sends a `load` before each file's first strings.
+ * The first batch in each linted file sets `refresh` to pick up CSS changes.
  */
 export type WorkerJob =
 	| { readonly type: "load"; readonly cssFile: string }
-	| { readonly type: "canonicalize"; readonly cssFile: string; readonly values: ReadonlyArray<string>; readonly rem: number };
+	| { readonly type: "canonicalize"; readonly cssFile: string; readonly values: ReadonlyArray<string>; readonly rem: number; readonly refresh?: boolean };
 
 /** `null` means the CSS entry could not be loaded. Otherwise, one entry per input value. */
 export type CanonicalizeResult = Array<Rewrite | null> | null;
@@ -60,7 +59,7 @@ export function createJobHandler(load: typeof __unstable__loadDesignSystem = def
 			await reload(job.cssFile);
 			return null;
 		}
-		const system = systems.find(entry => entry.cssFile === job.cssFile)?.system ?? await reload(job.cssFile);
+		const system = (job.refresh ? undefined : systems.find(entry => entry.cssFile === job.cssFile)?.system) ?? await reload(job.cssFile);
 		if (system === null) return null;
 		const options = { rem: job.rem };
 		// Tailwind deduplicates canonical spellings, so canonicalize one token per call.

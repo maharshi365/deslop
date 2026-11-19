@@ -29,10 +29,11 @@ function rootIdentifierName(node: ESTree.Expression): string | undefined {
 }
 
 function isTestCall(node: ESTree.CallExpression): boolean {
+	const args = node.arguments;
+	const callback = args[args.length - 1];
+	if (callback?.type !== "FunctionExpression" && callback?.type !== "ArrowFunctionExpression") return false;
 	const name = rootIdentifierName(node.callee);
-	if (name === undefined || !TEST_NAMES.has(name)) return false;
-	const callback = node.arguments.at(-1);
-	return callback?.type === "FunctionExpression" || callback?.type === "ArrowFunctionExpression";
+	return name !== undefined && TEST_NAMES.has(name);
 }
 
 function matcherName(node: ESTree.CallExpression): string | undefined {
@@ -60,11 +61,9 @@ function isAssertCall(node: ESTree.CallExpression): boolean {
 	return callee.type === "Identifier" && callee.name === "assert";
 }
 
-interface TestEntry {
-	node: ESTree.CallExpression;
-	total: number;
-	callOnly: number;
-}
+const NO_ASSERTION = 0;
+const CALL_ONLY = 1;
+const HAS_OTHER_ASSERTION = 2;
 
 /** Tests must assert on behavior, not only that a mock was called. */
 export const noCallOnlyAssertionsRule = defineRule({
@@ -78,36 +77,36 @@ export const noCallOnlyAssertionsRule = defineRule({
 		schema: [],
 	},
 	createOnce(context) {
-		let tests: Array<TestEntry> = [];
+		const tests: Array<ESTree.CallExpression> = [];
+		const assertionKinds: Array<number> = [];
 
 		return {
 			before() {
-				tests = [];
+				tests.length = 0;
+				assertionKinds.length = 0;
 				// Every call-only matcher name contains "Called". `\u` covers escaped identifiers.
 				const text = context.sourceCode.text;
 				return text.includes("Called") || text.includes("\\u");
 			},
 			CallExpression(node) {
 				if (isTestCall(node)) {
-					tests.push({ node, total: 0, callOnly: 0 });
+					tests.push(node);
+					assertionKinds.push(NO_ASSERTION);
 					return;
 				}
-				const test = tests.at(-1);
-				if (!test) return;
+				const index = tests.length - 1;
+				if (index < 0 || assertionKinds[index] === HAS_OTHER_ASSERTION) return;
 				if (isAssertCall(node)) {
-					test.total += 1;
+					assertionKinds[index] = HAS_OTHER_ASSERTION;
 					return;
 				}
 				const matcher = matcherName(node);
-				if (!matcher) return;
-				test.total += 1;
-				if (CALL_ONLY_MATCHERS.has(matcher)) test.callOnly += 1;
+				if (matcher) assertionKinds[index] = CALL_ONLY_MATCHERS.has(matcher) ? CALL_ONLY : HAS_OTHER_ASSERTION;
 			},
 			"CallExpression:exit"(node) {
-				const test = tests.at(-1);
-				if (test?.node !== node) return;
+				if (tests[tests.length - 1] !== node) return;
 				tests.pop();
-				if (test.total > 0 && test.total === test.callOnly) {
+				if (assertionKinds.pop() === CALL_ONLY) {
 					context.report({ messageId: "callOnlyAssertions", node: node.callee });
 				}
 			},

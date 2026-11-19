@@ -1,6 +1,7 @@
 import { RuleTester } from "oxlint/plugins-dev";
 import { describe, it } from "vitest";
 
+import { noArrayFilterMapRule } from "../../src/vendor/anti-slop/rules/no-array-filter-map.ts";
 import { noKnownValueWideningRule } from "../../src/vendor/anti-slop/rules/no-known-value-widening.ts";
 import { noModuleMockingRule } from "../../src/vendor/anti-slop/rules/no-module-mocking.ts";
 import { noObjectParametersRule } from "../../src/vendor/anti-slop/rules/no-object-parameters.ts";
@@ -9,6 +10,7 @@ import { noReflectApplyRule } from "../../src/vendor/anti-slop/rules/no-reflect-
 import { noReflectGetRule } from "../../src/vendor/anti-slop/rules/no-reflect-get.ts";
 import { noRuntimeTypeofRule } from "../../src/vendor/anti-slop/rules/no-runtime-typeof.ts";
 import { noForbiddenTermInSymbolNamesRule } from "../../src/vendor/anti-slop/rules/no-shape-in-symbol-names.ts";
+import { noUnsafeDictionaryTypeRule } from "../../src/vendor/anti-slop/rules/no-unsafe-dictionary-type.ts";
 import { noWidenThenAssertRule } from "../../src/vendor/anti-slop/rules/no-widen-then-assert.ts";
 
 RuleTester.describe = describe;
@@ -36,6 +38,22 @@ ruleTester.run("no-object-parameters", noObjectParametersRule, {
 			name: "reports an alias declared inside a namespace",
 			code: "namespace Space { type Input = object; export function f(value: Input) {} }",
 			errors: [{ messageId: "objectParameter" }],
+		},
+	],
+});
+
+ruleTester.run("no-unsafe-dictionary-type", noUnsafeDictionaryTypeRule, {
+	valid: ["type Values = Record<string, string>;"],
+	invalid: [
+		{
+			name: "reports a dictionary of empty interfaces with comments",
+			code: "interface Empty { /* no members */ }\ntype Values = Record<string, Empty>;",
+			errors: [{ messageId: "unsafeDictionary", data: { value: "empty-object" } }],
+		},
+		{
+			name: "reports an escaped Record name",
+			code: String.raw`type Values = Rec\u006frd<string, unknown>;`,
+			errors: [{ messageId: "unsafeDictionary", data: { value: "unknown" } }],
 		},
 	],
 });
@@ -96,6 +114,11 @@ ruleTester.run("no-module-mocking", noModuleMockingRule, {
 			errors: [{ messageId: "moduleMock" }],
 		},
 		{
+			name: "reports a computed mock method spelled with a hex escape",
+			code: String.raw`vi["m\x6fck"]("module");`,
+			errors: [{ messageId: "moduleMock" }],
+		},
+		{
 			name: "reports mocking through a renamed vitest import",
 			code: "import { vi as v } from 'vitest';\nv.unstable_mockModule('module');",
 			errors: [{ messageId: "moduleMock" }],
@@ -131,7 +154,21 @@ ruleTester.run("no-reduce-accumulator-copy", noReduceAccumulatorCopyRule, {
 			code: "items.reduce((acc, item) => acc.concat(item), []);",
 			errors: [{ messageId: "accumulatorCopy" }],
 		},
+		{
+			name: "reports a copy inside a reducer whose method name uses an escape",
+			code: String.raw`items["r\x65duce"]((acc, item) => acc.concat(item), []);`,
+			errors: [{ messageId: "accumulatorCopy" }],
+		},
 	],
+});
+
+ruleTester.run("no-array-filter-map", noArrayFilterMapRule, {
+	valid: ["items.filter(Boolean).map(String);"],
+	invalid: [{
+		name: "reports adjacent array passes even when both method names use escapes",
+		code: String.raw`[1]["f\x69lter"](Boolean).m\u0061p(String);`,
+		errors: [{ messageId: "arrayFilterMap", data: { first: "filter", second: "map" } }],
+	}],
 });
 
 ruleTester.run("no-known-value-widening", noKnownValueWideningRule, {

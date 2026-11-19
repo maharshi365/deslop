@@ -76,8 +76,8 @@ export function loadDesignSystem(cssFile: string): void {
 }
 
 /** Start canonicalizing class strings in the background. Collect the result with `takeRewrites`. */
-export function postClassValues(cssFile: string, values: ReadonlyArray<string>, rem: number): void {
-	worker().post({ type: "canonicalize", cssFile, values, rem }, true);
+export function postClassValues(cssFile: string, values: ReadonlyArray<string>, rem: number, refresh: boolean): void {
+	worker().post({ type: "canonicalize", cssFile, values, rem, refresh }, true);
 }
 
 /** Wait for the oldest posted class strings. Returns null when the CSS entry cannot be loaded. */

@@ -52,6 +52,9 @@ const typeNodeKinds: ReadonlySet<string> = new Set([
 	"TSVoidKeyword",
 ]);
 
+// An empty type literal or interface can also start with a comment after its opening brace.
+const EMPTY_OBJECT_START = /\{\s*(?:\}|\/)/;
+
 function isTypeNode(node: ESTree.Node): node is ESTree.TSType {
 	return typeNodeKinds.has(node.type);
 }
@@ -130,6 +133,14 @@ export const noUnsafeDictionaryTypeRule = defineRule({
 		};
 
 		return {
+			before() {
+				const text = context.sourceCode.text;
+				if (text.includes("\\u")) return true;
+				if (!text.includes("Record") && !text.includes("[")) return false;
+				// Even through an alias, a report needs an unsafe keyword or an effectively empty object.
+				return text.includes("unknown") || text.includes("any") || text.includes("object") ||
+					text.includes("never") || EMPTY_OBJECT_START.test(text);
+			},
 			...typeBindingVisitors(environment.typeAliases),
 			Program(node) {
 				resetTypeEnvironment(environment, node, context.sourceCode.visitorKeys);

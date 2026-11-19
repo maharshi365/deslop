@@ -78,6 +78,10 @@ export const noReduceAccumulatorCopyRule = defineRule({
   },
   createOnce(context) {
     return {
+      before() {
+        const text = context.sourceCode.text;
+        return text.includes("reduce") || text.includes("\\");
+      },
       CallExpression(node) {
         const name = arrayMethodName(node.callee);
         // Only these methods can copy an accumulator; skip the parent walk for every other call.

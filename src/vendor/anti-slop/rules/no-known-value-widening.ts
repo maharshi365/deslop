@@ -325,6 +325,7 @@ export const noKnownValueWideningRule = defineRule({
 		const constNames = new Set<string>();
 		const annotatedNames = new Set<string>();
 		const predicateNames = new Set<string>();
+		let mayHaveUnknownPredicate = false;
 		// Pending checks as parallel arrays. A flow stores its destination type, which is classified
 		// at exit because the type aliases it may use can be declared later in the file.
 		const kinds: Array<number> = [];
@@ -346,7 +347,9 @@ export const noKnownValueWideningRule = defineRule({
 			subjectKind: number,
 			subject: ESTree.Node | null,
 		) => {
-			if (annotation !== null && annotation !== undefined) push(subjectKind, expression, annotation.typeAnnotation, subject);
+			if (annotation !== null && annotation !== undefined && mayCarryEvidence(expression)) {
+				push(subjectKind, expression, annotation.typeAnnotation, subject);
+			}
 		};
 
 		const subjectText = (kind: number, subject: ESTree.Node | null): string => {
@@ -427,12 +430,15 @@ export const noKnownValueWideningRule = defineRule({
 		};
 
 		const addPredicateFunction = (node: ESTree.Function) => {
-			if (node.id !== null && isTypePredicateFunction(node)) predicateNames.add(node.id.name);
+			if (mayHaveUnknownPredicate && node.id !== null && isTypePredicateFunction(node)) predicateNames.add(node.id.name);
 		};
 
 		return {
 			...typeBindingVisitors(environment.typeAliases),
 			Program(node) {
+				const text = context.sourceCode.text;
+				mayHaveUnknownPredicate = (text.includes("unknown") && (text.includes("is") || text.includes("asserts"))) ||
+					text.includes("\\u");
 				constNames.clear();
 				annotatedNames.clear();
 				predicateNames.clear();
@@ -448,7 +454,7 @@ export const noKnownValueWideningRule = defineRule({
 					if (node.parent.type === "VariableDeclaration" && node.parent.kind === "const" && mayCarryEvidence(node.init)) {
 						addBindingNames(node.id, constNames);
 					}
-					if (isTypePredicateFunction(unwrapExpression(node.init))) addBindingNames(node.id, predicateNames);
+					if (mayHaveUnknownPredicate && isTypePredicateFunction(unwrapExpression(node.init))) addBindingNames(node.id, predicateNames);
 				}
 				const annotation = node.id.type === "Identifier" ? node.id.typeAnnotation : null;
 				if (annotation === null || annotation === undefined) return;
@@ -467,6 +473,7 @@ export const noKnownValueWideningRule = defineRule({
 				if (node.operator === "=" && node.left.type === "Identifier") push(ASSIGNMENT_CHECK, node, null, null);
 			},
 			CallExpression(node) {
+				if (!mayHaveUnknownPredicate || node.arguments.length === 0) return;
 				const callee = unwrapExpression(node.callee);
 				if (callee.type === "Identifier" || isFunctionExpression(callee)) push(CALL_CHECK, node, null, null);
 			},
@@ -479,10 +486,10 @@ export const noKnownValueWideningRule = defineRule({
 				if (node.body.type !== "BlockStatement") flow(node.body, node.returnType, RETURN_SUBJECT, node);
 			},
 			TSAsExpression(node) {
-				if (!hasParentAssertion(node)) push(ASSERTION_SUBJECT, node.expression, node.typeAnnotation, null);
+				if (!hasParentAssertion(node) && mayCarryEvidence(node.expression)) push(ASSERTION_SUBJECT, node.expression, node.typeAnnotation, null);
 			},
 			TSTypeAssertion(node) {
-				if (!hasParentAssertion(node)) push(ASSERTION_SUBJECT, node.expression, node.typeAnnotation, null);
+				if (!hasParentAssertion(node) && mayCarryEvidence(node.expression)) push(ASSERTION_SUBJECT, node.expression, node.typeAnnotation, null);
 			},
 			"Program:exit"() {
 				// Classify every destination first: assignments need the complete annotated names.

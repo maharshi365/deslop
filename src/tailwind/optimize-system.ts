@@ -43,8 +43,10 @@ function isComputedModifier(modifier: string): boolean {
  * property, so `--tw-*` properties count only for utilities that declare nothing else.
  */
 function propertyKey(properties: Array<string>): string {
+	if (properties.length === 0) return "";
+	if (properties.length === 1) return singlePropertyKey(properties[0]);
 	properties.sort();
-	const variablesOnly = properties.length > 0 && properties.every(property => property.startsWith("--tw-"));
+	const variablesOnly = properties.every(property => property.startsWith("--tw-"));
 	let key = variablesOnly ? "--tw" : "";
 	let previous: string | null = null;
 	for (const property of properties) {
@@ -55,28 +57,38 @@ function propertyKey(properties: Array<string>): string {
 	return key;
 }
 
+function singlePropertyKey(property: string): string {
+	return property.startsWith("--tw-") ? `--tw\0${property}` : property;
+}
+
+function visitProperties(node: AstNode, properties: Array<string>): void {
+	if (node.kind === "at-rule" && node.name === "@property") return;
+	if (node.kind === "declaration" && node.value !== undefined && node.property !== "--tw-sort") properties.push(node.property);
+	if ("nodes" in node) for (const child of node.nodes) visitProperties(child, properties);
+}
+
+function isFallback(utility: Utility): boolean {
+	const types = utility.options?.types;
+	return types !== undefined && types.length > 1 && types.includes("any");
+}
+
 /** Collect declared properties through utility compilers, without selectors, sorting, or `@apply`. */
 function compiledProperties(system: DesignSystem, candidate: Candidate, properties: Array<string>): void {
-	const visit = (node: AstNode) => {
-		if (node.kind === "at-rule" && node.name === "@property") return;
-		if (node.kind === "declaration" && node.value !== undefined && node.property !== "--tw-sort") properties.push(node.property);
-		if ("nodes" in node) for (const child of node.nodes) visit(child);
-	};
 	if (candidate.kind === "arbitrary") {
-		for (const { node } of system.compileAstNodes({ ...candidate, variants: [], important: false })) visit(node);
+		for (const { node } of system.compileAstNodes({ ...candidate, variants: [], important: false })) visitProperties(node, properties);
 		return;
 	}
-	const utilities: Array<Utility> = system.utilities.get(candidate.root) ?? [];
-	const isFallback = (utility: Utility) => (utility.options?.types?.length ?? 0) > 1 && utility.options!.types!.includes("any");
-	for (const fallback of [false, true]) {
+	const utilities: Array<Utility> | undefined = system.utilities.get(candidate.root);
+	if (utilities === undefined) return;
+	for (let pass = 0; pass < 2; pass++) {
 		let accepted = false;
 		for (const utility of utilities) {
-			if (utility.kind !== candidate.kind || isFallback(utility) !== fallback) continue;
+			if (utility.kind !== candidate.kind || isFallback(utility) !== (pass === 1)) continue;
 			const nodes = utility.compileFn(candidate);
 			if (nodes === null && utility.options?.types?.length) { accepted = true; break; }
 			if (nodes === null || nodes === undefined) continue;
 			accepted = true;
-			for (const node of nodes) visit(node);
+			for (const node of nodes) visitProperties(node, properties);
 		}
 		if (accepted) break;
 	}
@@ -84,8 +96,12 @@ function compiledProperties(system: DesignSystem, candidate: Candidate, properti
 
 /** Read the declared properties of a Tailwind utility signature, which is printed CSS. */
 function signatureKey(signature: string): string {
-	const properties: Array<string> = [];
-	for (const match of signature.matchAll(DECLARATION)) properties.push(match[1]);
+	const first = DECLARATION.exec(signature);
+	if (first === null) return "";
+	const second = DECLARATION.exec(signature);
+	if (second === null) return singlePropertyKey(first[1]);
+	const properties = [first[1], second[1]];
+	for (let match = DECLARATION.exec(signature); match !== null; match = DECLARATION.exec(signature)) properties.push(match[1]);
 	return propertyKey(properties);
 }
 
