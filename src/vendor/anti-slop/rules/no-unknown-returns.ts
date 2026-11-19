@@ -4,7 +4,9 @@ import type { ESTree } from "@oxlint/plugins";
 
 import {
   createTypeAliasEnvironment,
+  resetTypeAliasEnvironment,
   resolvedTypeMatches,
+  typeBindingVisitors,
   type TypeAliasEnvironment,
 } from "../shared/type-alias-resolution.ts";
 
@@ -31,10 +33,11 @@ export const noUnknownReturnsRule = defineRule({
     },
   },
   createOnce(context) {
-    let environment: TypeAliasEnvironment | null = null;
+    const environment: TypeAliasEnvironment = createTypeAliasEnvironment();
+    // Aliases may be declared after their use, so return types are checked at exit, in visit order.
+    const owners: Array<FunctionWithReturnType> = [];
 
     const resolvesToUnknown = (type: ESTree.TSType): boolean =>
-      environment !== null &&
       resolvedTypeMatches(type, environment, (resolved, matches) => {
         if (resolved.type === "TSUnknownKeyword") return true;
         if (resolved.type === "TSParenthesizedType") {
@@ -60,24 +63,29 @@ export const noUnknownReturnsRule = defineRule({
       context.report({ node: annotation.typeAnnotation, messageId: "unknownReturn" });
     };
 
+    const addOwner = (node: FunctionWithReturnType) => {
+      if (node.returnType !== null && node.returnType !== undefined) owners.push(node);
+    };
+
     return {
-      Program(node) {
-        environment = createTypeAliasEnvironment(
-          node,
-          context.sourceCode.visitorKeys,
-          context.sourceCode.text,
-        );
+      ...typeBindingVisitors(environment),
+      before() {
+        resetTypeAliasEnvironment(environment, context.sourceCode.visitorKeys);
+        owners.length = 0;
       },
-      ArrowFunctionExpression: checkReturnType,
-      FunctionDeclaration: checkReturnType,
-      FunctionExpression: checkReturnType,
-      TSCallSignatureDeclaration: checkReturnType,
-      TSConstructSignatureDeclaration: checkReturnType,
-      TSConstructorType: checkReturnType,
-      TSDeclareFunction: checkReturnType,
-      TSEmptyBodyFunctionExpression: checkReturnType,
-      TSFunctionType: checkReturnType,
-      TSMethodSignature: checkReturnType,
+      ArrowFunctionExpression: addOwner,
+      FunctionDeclaration: addOwner,
+      FunctionExpression: addOwner,
+      TSCallSignatureDeclaration: addOwner,
+      TSConstructSignatureDeclaration: addOwner,
+      TSConstructorType: addOwner,
+      TSDeclareFunction: addOwner,
+      TSEmptyBodyFunctionExpression: addOwner,
+      TSFunctionType: addOwner,
+      TSMethodSignature: addOwner,
+      "Program:exit"() {
+        for (const node of owners) checkReturnType(node);
+      },
     };
   },
 });

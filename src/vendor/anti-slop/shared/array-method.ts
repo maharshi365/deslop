@@ -28,6 +28,16 @@ export function resolveArrayBinding(sourceCode: SourceCode, node: ESTree.Node): 
   return null;
 }
 
+/** Read a static method name, including a computed string literal, without allocating. */
+export function arrayMethodName(node: ESTree.Node): string | null {
+  node = unwrapArrayExpression(node);
+  if (node.type !== "MemberExpression") return null;
+  const property = node.property;
+  if (!node.computed && property.type === "Identifier") return property.name;
+  if (node.computed && property.type === "Literal" && typeof property.value === "string") return property.value;
+  return null;
+}
+
 /** Read static method names, including computed string literals, without evaluating expressions. */
 export function arrayMethodTarget(
   node: ESTree.Node,

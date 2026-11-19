@@ -21,8 +21,36 @@ ruleTester.run("no-renamed-imports", noRenamedImportsRule, {
 			name: "allows aliases for string-named exports, which cannot be local identifiers",
 			code: "import { 'not-an-identifier' as identifier } from 'package';",
 		},
+		{
+			name: "allows aliases when a var hoisted out of a block declares the imported name",
+			code: "import { a as b } from 'x';\nif (b) { for (;;) { var a = 1; } }",
+		},
+		{
+			name: "allows aliases when a type declares the imported name",
+			code: "import type { A as B } from 'x';\ntype A = B;",
+		},
+		{
+			name: "allows aliases when a default-exported function declares the imported name",
+			code: "import { a as b } from 'x';\nexport default function a() { return b; }",
+		},
+		{
+			name: "allows aliases when a destructuring pattern declares the imported name",
+			code: "import { a as b } from 'x';\nconst { c: [a = 1] } = b;",
+		},
 	],
 	invalid: [
+		{
+			name: "reports when the imported name is declared only in a nested block",
+			code: "import { a as b } from 'x';\nb();\n{ const a = 1; }",
+			output: "import { a } from 'x';\na();\n{ const a = 1; }",
+			errors: [{ messageId: "unnecessaryAlias" }],
+		},
+		{
+			name: "reports when the imported name is declared only inside a namespace",
+			code: "import { a as b } from 'x';\nnamespace N { export const a = 1; }\nb();",
+			output: "import { a } from 'x';\nnamespace N { export const a = 1; }\na();",
+			errors: [{ messageId: "unnecessaryAlias" }],
+		},
 		{
 			name: "removes a type import alias and renames type references",
 			code: "import type { SandboxConfiguration as SandboxConfig } from '@stitch/schemas/sandboxes';\nconst config: SandboxConfig = {};",

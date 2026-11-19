@@ -2,6 +2,7 @@ import { defineRule } from "@oxlint/plugins";
 import type { ESTree, SourceCode, Variable } from "@oxlint/plugins";
 
 import {
+  arrayMethodName,
   arrayMethodTarget,
   isKnownArrayExpression,
   resolveArrayBinding,
@@ -78,13 +79,10 @@ export const noReduceAccumulatorCopyRule = defineRule({
   createOnce(context) {
     return {
       CallExpression(node) {
-        const method = arrayMethodTarget(node.callee);
-        if (method === null) return;
+        const name = arrayMethodName(node.callee);
         // Only these methods can copy an accumulator; skip the parent walk for every other call.
-        if (
-          method.name !== "assign" && method.name !== "from" &&
-          !ARRAY_COPY_METHODS.includes(method.name)
-        ) return;
+        if (name === null || (name !== "assign" && name !== "from" && !ARRAY_COPY_METHODS.includes(name))) return;
+        const method = arrayMethodTarget(node.callee)!;
         const reducer = enclosingReducer(node);
         if (reducer === null) return;
         const accumulator = context.sourceCode.getDeclaredVariables(reducer.callback).find(variable =>

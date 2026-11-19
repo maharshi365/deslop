@@ -65,8 +65,26 @@ ruleTester.run("no-module-mocking", noModuleMockingRule, {
 			name: "allows mock methods on a local object named vi",
 			code: "const vi = { mock() {} };\nvi.mock('module');",
 		},
+		{
+			name: "allows mocking through vi bound to another vitest export",
+			code: "import { fn as vi } from 'vitest';\nvi.mock('module');",
+		},
+		{
+			name: "allows mocking through a local vi spelled with a Unicode escape",
+			code: "const \\u0076i = { mock() {} };\nvi.mock('module');",
+		},
 	],
 	invalid: [
+		{
+			name: "reports vi.mock when a dotted namespace name only mentions vi, as scope analysis does",
+			code: "namespace vi.inner {}\nvi.mock('module');",
+			errors: [{ messageId: "moduleMock" }],
+		},
+		{
+			name: "reports vi.mock through vi imported from vitest",
+			code: "import { vi } from 'vitest';\nvi.mock('module');\nvi.fn();",
+			errors: [{ messageId: "moduleMock" }],
+		},
 		{
 			name: "reports global vi.mock",
 			code: "vi.mock('module');",
@@ -130,8 +148,41 @@ ruleTester.run("no-known-value-widening", noKnownValueWideningRule, {
 			name: "allows predicate calls with an argument that has no known evidence",
 			code: "function isUser(value: unknown): value is { id: string } { return true; }\nisUser(input);",
 		},
+		{
+			name: "resolves an assignment to the nearest binding, not an annotated one with the same name",
+			code: "let target: unknown;\nfunction f() { let target = 1; target = 2; }",
+		},
+		{
+			name: "allows identifiers bound by let, which carry no evidence",
+			code: "let value = { a: 1 };\nconst widened: unknown = value;",
+		},
 	],
 	invalid: [
+		{
+			name: "reports a call that precedes its hoisted predicate function",
+			code: "isUser({ id: 'a' });\nfunction isUser(value: unknown): value is { id: string } { return true; }",
+			errors: [{ messageId: "widening" }],
+		},
+		{
+			name: "reports a call to a predicate arrow function bound to a const",
+			code: "const isUser = (value: unknown): value is { id: string } => true;\nisUser({ id: 'a' });",
+			errors: [{ messageId: "widening" }],
+		},
+		{
+			name: "reports an assignment that precedes the annotated declaration it targets",
+			code: "function f() { target = { a: 1 }; }\nlet target: unknown;",
+			errors: [{ messageId: "widening", data: { subject: "binding `target`", target: "unknown" } }],
+		},
+		{
+			name: "reports evidence through a const declared after its use",
+			code: "function f(): unknown { return value; }\nconst value = { a: 1 };",
+			errors: [{ messageId: "widening", data: { subject: "return value of `f`", target: "unknown" } }],
+		},
+		{
+			name: "reports evidence through a destructured const binding",
+			code: "const { a } = { a: { b: 1 } };\nconst widened: unknown = a;",
+			errors: [{ messageId: "widening", data: { subject: "binding `widened`", target: "unknown" } }],
+		},
 		{
 			name: "reports a known value passed to an unknown type-predicate parameter",
 			code: "function isUser(value: unknown): value is { id: string } { return true; }\nisUser({ id: 'a' });",

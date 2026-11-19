@@ -31,31 +31,34 @@ function collectInferTypeParameterNames(
 	}
 }
 
-/** Collect type binders that are in scope at a node and can shadow module aliases. */
-export function lexicalTypeParameterNames(
+/** Return whether a type binder named `name` is in scope at a node and can shadow module aliases. */
+export function hasLexicalTypeParameter(
 	node: ESTree.Node,
+	name: string,
 	visitorKeys: VisitorKeys,
-): ReadonlySet<string> {
-	const names = new Set<string>();
+): boolean {
 	let descendant: ESTree.Node = node;
 	let current: ESTree.Node | null = node;
 	while (current !== null && current.type !== "Program") {
 		if ("typeParameters" in current) {
 			for (const parameter of current.typeParameters?.params ?? []) {
-				names.add(parameter.name.name);
+				if (parameter.name.name === name) return true;
 			}
 		}
 		if (
 			current.type === "TSMappedType" &&
-			(descendant === current.nameType || descendant === current.typeAnnotation)
+			(descendant === current.nameType || descendant === current.typeAnnotation) &&
+			current.key.name === name
 		) {
-			names.add(current.key.name);
+			return true;
 		}
 		if (current.type === "TSConditionalType" && descendant === current.trueType) {
+			const names = new Set<string>();
 			collectInferTypeParameterNames(current.extendsType, visitorKeys, names);
+			if (names.has(name)) return true;
 		}
 		descendant = current;
 		current = current.parent;
 	}
-	return names;
+	return false;
 }

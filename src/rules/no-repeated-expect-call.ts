@@ -24,7 +24,8 @@ function isExpect(identifier: ESTree.CallExpression["callee"], sourceCode: Sourc
 	return identifier.name === "expect";
 }
 
-function assertionCall(statement: ESTree.Node, sourceCode: SourceCode): ESTree.CallExpression | null {
+/** Shape of `expect(call()).matcher()`. Whether the callee really is `expect` is checked separately. */
+function assertionCall(statement: ESTree.Node): ESTree.CallExpression | null {
 	if (statement.type !== "ExpressionStatement") return null;
 	let expression = statement.expression;
 	if (expression.type === "AwaitExpression") expression = expression.argument;
@@ -34,15 +35,34 @@ function assertionCall(statement: ESTree.Node, sourceCode: SourceCode): ESTree.C
 	if (
 		assertion.type !== "CallExpression" ||
 		assertion.arguments.length !== 1 ||
-		!isExpect(assertion.callee, sourceCode)
+		assertion.callee.type !== "Identifier"
 	) return null;
 	let call = assertion.arguments[0];
 	if (call.type === "AwaitExpression") call = call.argument;
 	return call.type === "CallExpression" ? call : null;
 }
 
+function expectCallee(call: ESTree.CallExpression): ESTree.CallExpression["callee"] {
+	// The shape check above guarantees `expect(call)` is the call's nearest CallExpression ancestor.
+	let assertion: ESTree.Node = call.parent;
+	if (assertion.type === "AwaitExpression") assertion = assertion.parent;
+	return (assertion as ESTree.CallExpression).callee;
+}
+
+/** Remove whitespace and commas. Equal token lists without comments always strip to equal text. */
+function strippedText(text: string): string {
+	return text.replace(/[\s,]+/g, "");
+}
+
 function sameCall(left: ESTree.CallExpression, right: ESTree.CallExpression, sourceCode: SourceCode): boolean {
-	if (sourceCode.getText(left) === sourceCode.getText(right)) return true;
+	const leftText = sourceCode.getText(left);
+	const rightText = sourceCode.getText(right);
+	if (leftText === rightText) return true;
+	// Tokens ignore whitespace, comments, and trailing commas. Without a `/`, neither text has a
+	// comment, so different stripped text means different tokens. A `\` escape can spell the same
+	// token two ways, so it disables this check.
+	const plain = !leftText.includes("/") && !rightText.includes("/") && !leftText.includes("\\") && !rightText.includes("\\");
+	if (plain && strippedText(leftText) !== strippedText(rightText)) return false;
 	const leftTokens = sourceCode.getTokens(left);
 	const rightTokens = sourceCode.getTokens(right);
 	let leftIndex = 0;
@@ -82,8 +102,12 @@ export const noRepeatedExpectCallRule = defineRule({
 		function checkStatements(node: ESTree.Program | ESTree.BlockStatement) {
 			let previous: ESTree.CallExpression | null = null;
 			for (const statement of node.body) {
-				const call = assertionCall(statement, context.sourceCode);
-				if (call && previous && sameCall(previous, call, context.sourceCode)) {
+				const call = assertionCall(statement);
+				// Resolving `expect` needs scope analysis, so check it only for repeated calls.
+				if (
+					call && previous && sameCall(previous, call, context.sourceCode) &&
+					isExpect(expectCallee(previous), context.sourceCode) && isExpect(expectCallee(call), context.sourceCode)
+				) {
 					context.report({ node: call, messageId: "repeatedCall" });
 				}
 				previous = call;

@@ -8,6 +8,8 @@ import { describe, it } from "vitest";
 
 import {
 	createTypeAliasEnvironment,
+	resetTypeAliasEnvironment,
+	typeBindingVisitors,
 	type TypeAliasEnvironment,
 } from "../../src/vendor/anti-slop/shared/type-alias-resolution.ts";
 
@@ -18,8 +20,9 @@ type VisitorKeys = Readonly<Record<string, readonly string[]>>;
 type Binding = TypeAliasEnvironment["bindingsByName"] extends ReadonlyMap<string, readonly (infer T)[]>
 	? T
 	: never;
+type OldBinding = Binding & { readonly name: string };
 
-// Copy of the previous full-AST walk. The optimized walk must produce identical output.
+// Copy of the original full-AST walk. The bindings rule visitors record must be identical.
 function oldIsNode(value: unknown): value is ESTree.Node {
 	return typeof value === "object" && value !== null && "type" in value && typeof value.type === "string";
 }
@@ -66,32 +69,30 @@ function oldDeclaredTypeBinding(
 function oldCollectTypeBindings(
 	node: ESTree.Node,
 	visitorKeys: VisitorKeys,
-	bindingsByName: Map<string, Binding[]>,
-	aliases: ESTree.TSTypeAliasDeclaration[],
+	bindingsByName: Map<string, OldBinding[]>,
 ): void {
 	const declared = oldDeclaredTypeBinding(node);
 	if (declared !== null) {
 		const bindings = bindingsByName.get(declared.name) ?? [];
 		bindings.push({ ...declared, scope: oldEnclosingTypeScope(node) });
 		bindingsByName.set(declared.name, bindings);
-		if (declared.alias !== null) aliases.push(declared.alias);
 	}
 	const fields = node as unknown as Readonly<Record<string, unknown>>;
 	for (const key of visitorKeys[node.type] ?? []) {
 		const value = fields[key];
 		if (oldIsNode(value)) {
-			oldCollectTypeBindings(value, visitorKeys, bindingsByName, aliases);
+			oldCollectTypeBindings(value, visitorKeys, bindingsByName);
 			continue;
 		}
 		if (!Array.isArray(value)) continue;
 		for (const child of value) {
-			if (oldIsNode(child)) oldCollectTypeBindings(child, visitorKeys, bindingsByName, aliases);
+			if (oldIsNode(child)) oldCollectTypeBindings(child, visitorKeys, bindingsByName);
 		}
 	}
 }
 
 function sameBindings(
-	expected: ReadonlyMap<string, readonly Binding[]>,
+	expected: ReadonlyMap<string, readonly OldBinding[]>,
 	actual: ReadonlyMap<string, readonly Binding[]>,
 ): boolean {
 	const expectedNames = [...expected.keys()];
@@ -104,7 +105,6 @@ function sameBindings(
 			left.length === right.length &&
 			left.every(
 				(binding, index) =>
-					binding.name === right[index]?.name &&
 					binding.alias === right[index]?.alias &&
 					binding.scope === right[index]?.scope,
 			)
@@ -112,39 +112,27 @@ function sameBindings(
 	});
 }
 
-function sameAliases(
-	expected: readonly ESTree.TSTypeAliasDeclaration[],
-	actual: readonly ESTree.TSTypeAliasDeclaration[],
-): boolean {
-	return expected.length === actual.length && expected.every((alias, index) => alias === actual[index]);
-}
-
-function compareCollections(program: ESTree.Program, visitorKeys: VisitorKeys, text: string) {
-	const expectedBindings = new Map<string, Binding[]>();
-	const expectedAliases: ESTree.TSTypeAliasDeclaration[] = [];
-	oldCollectTypeBindings(program, visitorKeys, expectedBindings, expectedAliases);
-	const environment = createTypeAliasEnvironment(program, visitorKeys, text);
-	const same =
-		sameBindings(expectedBindings, environment.bindingsByName) &&
-		sameAliases(expectedAliases, environment.aliases);
-	const names = [...environment.bindingsByName.values()]
-		.flat()
-		.map((binding) => `${binding.name}${binding.alias === null ? "" : "="}@${binding.scope.type}`)
+/** Compare the bindings the visitors recorded with the old full walk. */
+function compareCollections(program: ESTree.Program, visitorKeys: VisitorKeys, environment: TypeAliasEnvironment) {
+	const expectedBindings = new Map<string, OldBinding[]>();
+	oldCollectTypeBindings(program, visitorKeys, expectedBindings);
+	const same = sameBindings(expectedBindings, environment.bindingsByName);
+	const names = [...environment.bindingsByName]
+		.flatMap(([name, bindings]) => bindings.map((binding) => `${name}${binding.alias === null ? "" : "="}@${binding.scope.type}`))
 		.join(",");
 	return { same, names };
 }
 
-/** Report the optimized bindings and whether they match the old full walk. */
+/** Report the bindings the rule visitors recorded and whether they match the old full walk. */
 const bindingsProbeRule = defineRule({
 	meta: { messages: { bindings: "{{status}}: {{names}}" } },
 	create(context) {
+		const environment = createTypeAliasEnvironment();
+		resetTypeAliasEnvironment(environment, context.sourceCode.visitorKeys);
 		return {
-			Program(node) {
-				const { same, names } = compareCollections(
-					node,
-					context.sourceCode.visitorKeys,
-					context.sourceCode.text,
-				);
+			...typeBindingVisitors(environment),
+			"Program:exit"(node) {
+				const { same, names } = compareCollections(node, context.sourceCode.visitorKeys, environment);
 				context.report({
 					node,
 					messageId: "bindings",
@@ -155,17 +143,16 @@ const bindingsProbeRule = defineRule({
 	},
 });
 
-/** Report only when the optimized bindings differ from the old full walk. */
+/** Report only when the recorded bindings differ from the old full walk. */
 const bindingsMismatchRule = defineRule({
-	meta: { messages: { differs: "Optimized type bindings differ from the full walk." } },
+	meta: { messages: { differs: "Recorded type bindings differ from the full walk." } },
 	create(context) {
+		const environment = createTypeAliasEnvironment();
+		resetTypeAliasEnvironment(environment, context.sourceCode.visitorKeys);
 		return {
-			Program(node) {
-				const { same } = compareCollections(
-					node,
-					context.sourceCode.visitorKeys,
-					context.sourceCode.text,
-				);
+			...typeBindingVisitors(environment),
+			"Program:exit"(node) {
+				const { same } = compareCollections(node, context.sourceCode.visitorKeys, environment);
 				if (!same) context.report({ node, messageId: "differs" });
 			},
 		};

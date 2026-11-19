@@ -4,7 +4,9 @@ import type { ESTree } from "@oxlint/plugins";
 
 import {
 	createTypeAliasEnvironment,
+	resetTypeAliasEnvironment,
 	resolvedTypeMatches,
+	typeBindingVisitors,
 	type TypeAliasEnvironment,
 } from "../shared/type-alias-resolution.ts";
 
@@ -22,10 +24,12 @@ export const noUnknownTypeAliasesRule = defineRule({
 		},
 	},
 	createOnce(context) {
-		let environment: TypeAliasEnvironment | null = null;
+		const environment: TypeAliasEnvironment = createTypeAliasEnvironment();
+		const bindings = typeBindingVisitors(environment);
+		// Aliases may refer to later declarations, so they are checked at exit, in visit order.
+		const aliases: Array<ESTree.TSTypeAliasDeclaration> = [];
 
 		const resolvesToUnknown = (type: ESTree.TSType): boolean =>
-			environment !== null &&
 			resolvedTypeMatches(type, environment, (resolved, matches) => {
 				if (resolved.type === "TSUnknownKeyword") return true;
 				if (resolved.type === "TSParenthesizedType") {
@@ -35,20 +39,24 @@ export const noUnknownTypeAliasesRule = defineRule({
 			});
 
 		return {
-			Program(node) {
-				environment = createTypeAliasEnvironment(
-					node,
-					context.sourceCode.visitorKeys,
-					context.sourceCode.text,
-				);
+			...bindings,
+			before() {
+				resetTypeAliasEnvironment(environment, context.sourceCode.visitorKeys);
+				aliases.length = 0;
 			},
 			TSTypeAliasDeclaration(node) {
-				if (!resolvesToUnknown(node.typeAnnotation)) return;
-				context.report({
-					node: node.id,
-					messageId: "unknownAlias",
-					data: { alias: node.id.name },
-				});
+				bindings.TSTypeAliasDeclaration(node);
+				aliases.push(node);
+			},
+			"Program:exit"() {
+				for (const node of aliases) {
+					if (!resolvesToUnknown(node.typeAnnotation)) continue;
+					context.report({
+						node: node.id,
+						messageId: "unknownAlias",
+						data: { alias: node.id.name },
+					});
+				}
 			},
 		};
 	},

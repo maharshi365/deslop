@@ -27,42 +27,67 @@ export const noReexportsOutsideEntrypointsRule = defineRule({
 		}],
 	},
 	createOnce(context) {
+		// Re-export candidates in visit order: a module re-export, or an exported local identifier
+		// paired with the node to report. Locals are checked at exit, once every import is known.
+		const candidates: Array<ESTree.Node> = [];
+		const locals: Array<ESTree.IdentifierReference | null> = [];
+		const importedNames = new Set<string>();
+
 		function isImported(node: ESTree.IdentifierReference): boolean {
+			// An import binding always has an import specifier with its name; skip scope analysis otherwise.
+			if (!importedNames.has(node.name)) return false;
 			return resolveVariable(context.sourceCode, node)?.defs.some((definition) => definition.type === "ImportBinding") ?? false;
 		}
 
-		// Most files have no re-exports, so match the entrypoint globs only on the first one.
-		let entrypoint: boolean | undefined;
 		function isEntrypoint(): boolean {
-			if (entrypoint === undefined) {
-				const options = context.options[0] as Options | undefined;
-				const filename = relative(context.cwd, context.filename).replaceAll("\\", "/");
-				entrypoint = (options?.entrypoints ?? defaultEntrypoints).some((pattern) => matchesGlob(filename, pattern));
-			}
-			return entrypoint;
+			const options = context.options[0] as Options | undefined;
+			const filename = relative(context.cwd, context.filename).replaceAll("\\", "/");
+			return (options?.entrypoints ?? defaultEntrypoints).some((pattern) => matchesGlob(filename, pattern));
+		}
+
+		function addImportedName(node: ESTree.ImportSpecifier | ESTree.ImportDefaultSpecifier | ESTree.ImportNamespaceSpecifier) {
+			importedNames.add(node.local.name);
 		}
 
 		return {
 			before() {
-				entrypoint = undefined;
+				candidates.length = 0;
+				locals.length = 0;
+				importedNames.clear();
 			},
+			ImportSpecifier: addImportedName,
+			ImportDefaultSpecifier: addImportedName,
+			ImportNamespaceSpecifier: addImportedName,
 			ExportNamedDeclaration(node) {
 				if (node.source !== null) {
-					if (!isEntrypoint()) context.report({ node, messageId: "reexport" });
+					candidates.push(node);
+					locals.push(null);
 					return;
 				}
 				for (const specifier of node.specifiers) {
-					if (specifier.local.type === "Identifier" && isImported(specifier.local) && !isEntrypoint()) {
-						context.report({ node: specifier, messageId: "reexport" });
-					}
+					if (specifier.local.type !== "Identifier") continue;
+					candidates.push(specifier);
+					locals.push(specifier.local);
 				}
 			},
 			ExportAllDeclaration(node) {
-				if (!isEntrypoint()) context.report({ node, messageId: "reexport" });
+				candidates.push(node);
+				locals.push(null);
 			},
 			ExportDefaultDeclaration(node) {
-				if (node.declaration.type === "Identifier" && isImported(node.declaration) && !isEntrypoint()) {
-					context.report({ node, messageId: "reexport" });
+				if (node.declaration.type !== "Identifier") return;
+				candidates.push(node);
+				locals.push(node.declaration);
+			},
+			"Program:exit"() {
+				// Most files have no re-exports, so match the entrypoint globs only for a confirmed one.
+				let entrypoint: boolean | undefined;
+				for (let i = 0; i < candidates.length; i++) {
+					const local = locals[i];
+					if (local !== null && !isImported(local)) continue;
+					entrypoint ??= isEntrypoint();
+					if (entrypoint) return;
+					context.report({ node: candidates[i], messageId: "reexport" });
 				}
 			},
 		};

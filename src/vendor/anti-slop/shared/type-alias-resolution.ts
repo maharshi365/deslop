@@ -1,13 +1,12 @@
 import type { ESTree } from "@oxlint/plugins";
 
-import { lexicalTypeParameterNames } from "./lexical-type-parameters.ts";
+import { hasLexicalTypeParameter } from "./lexical-type-parameters.ts";
 
 type VisitorKeys = Readonly<Record<string, readonly string[]>>;
 type TypeScope = ESTree.Node;
 
 type TypeBinding = {
 	readonly alias: ESTree.TSTypeAliasDeclaration | null;
-	readonly name: string;
 	readonly scope: TypeScope;
 };
 
@@ -18,10 +17,13 @@ type Substitution = {
 
 type Substitutions = ReadonlyMap<string, Substitution>;
 
+/**
+ * Every type binding in the file being linted, by name. A rule fills it from the visitors of
+ * `typeBindingVisitors` and queries it at Program:exit, once the whole file has been visited.
+ */
 export type TypeAliasEnvironment = {
-	readonly aliases: readonly ESTree.TSTypeAliasDeclaration[];
-	readonly bindingsByName: ReadonlyMap<string, readonly TypeBinding[]>;
-	readonly visitorKeys: VisitorKeys;
+	readonly bindingsByName: Map<string, TypeBinding[]>;
+	visitorKeys: VisitorKeys;
 };
 
 export type ResolvedTypeMatcher = (
@@ -29,16 +31,8 @@ export type ResolvedTypeMatcher = (
 	matches: (child: ESTree.TSType) => boolean,
 ) => boolean;
 
-const environmentsByProgram = new WeakMap<ESTree.Program, TypeAliasEnvironment>();
-
-function isNode(value: unknown): value is ESTree.Node {
-	return (
-		typeof value === "object" &&
-		value !== null &&
-		"type" in value &&
-		typeof value.type === "string"
-	);
-}
+const NO_SUBSTITUTIONS: Substitutions = new Map();
+const NO_ALIASES: ReadonlySet<ESTree.TSTypeAliasDeclaration> = new Set();
 
 function enclosingTypeScope(node: ESTree.Node): TypeScope {
 	let current: ESTree.Node | null = node.parent;
@@ -57,133 +51,47 @@ function enclosingTypeScope(node: ESTree.Node): TypeScope {
 	return node;
 }
 
-function declaredTypeBinding(node: ESTree.Node): {
-	readonly alias: ESTree.TSTypeAliasDeclaration | null;
-	readonly name: string;
-} | null {
-	if (node.type === "TSTypeAliasDeclaration") {
-		return { alias: node, name: node.id.name };
-	}
-	if (
-		node.type === "TSInterfaceDeclaration" ||
-		node.type === "TSEnumDeclaration" ||
-		node.type === "ClassDeclaration" ||
-		node.type === "ClassExpression"
-	) {
-		return node.id === null ? null : { alias: null, name: node.id.name };
-	}
-	if (
-		node.type === "ImportSpecifier" ||
-		node.type === "ImportDefaultSpecifier" ||
-		node.type === "ImportNamespaceSpecifier"
-	) {
-		return { alias: null, name: node.local.name };
-	}
-	return null;
+export function createTypeAliasEnvironment(): TypeAliasEnvironment {
+	return { bindingsByName: new Map(), visitorKeys: {} };
 }
 
-/**
- * Every node that declares a type binding contains one of these keywords in its own source
- * range. Import specifiers are the exception; they are reached through their ImportDeclaration.
- */
-const BINDING_KEYWORD = /\b(?:class|enum|import|interface|type)\b/g;
-
-type BindingCollection = {
-	readonly aliases: ESTree.TSTypeAliasDeclaration[];
-	readonly bindingsByName: Map<string, TypeBinding[]>;
-};
-
-function bindingKeywordOffsets(sourceText: string): number[] {
-	const offsets: number[] = [];
-	for (const match of sourceText.matchAll(BINDING_KEYWORD)) offsets.push(match.index);
-	return offsets;
+/** Start a new file. */
+export function resetTypeAliasEnvironment(environment: TypeAliasEnvironment, visitorKeys: VisitorKeys): void {
+	environment.bindingsByName.clear();
+	environment.visitorKeys = visitorKeys;
 }
 
-/** Return whether a sorted offset list has an entry in `[start, end)`. */
-function hasOffsetInRange(offsets: readonly number[], start: number, end: number): boolean {
-	let low = 0;
-	let high = offsets.length;
-	while (low < high) {
-		const middle = (low + high) >>> 1;
-		if ((offsets[middle] ?? 0) < start) low = middle + 1;
-		else high = middle;
-	}
-	return low < offsets.length && (offsets[low] ?? end) < end;
+function addBinding(environment: TypeAliasEnvironment, name: string, alias: ESTree.TSTypeAliasDeclaration | null, node: ESTree.Node): void {
+	const binding = { alias, scope: enclosingTypeScope(node) };
+	const bindings = environment.bindingsByName.get(name);
+	if (bindings === undefined) environment.bindingsByName.set(name, [binding]);
+	else bindings.push(binding);
 }
 
-function collectTypeBindings(
-	node: ESTree.Node,
-	visitorKeys: VisitorKeys,
-	offsets: readonly number[],
-	visitAll: boolean,
-	collection: BindingCollection,
-): void {
-	const declared = declaredTypeBinding(node);
-	if (declared !== null) {
-		const bindings = collection.bindingsByName.get(declared.name) ?? [];
-		bindings.push({ ...declared, scope: enclosingTypeScope(node) });
-		collection.bindingsByName.set(declared.name, bindings);
-		if (declared.alias !== null) collection.aliases.push(declared.alias);
-	}
-
-	const visitChildren = visitAll || node.type === "ImportDeclaration";
-	// SAFETY: Oxlint's visitor keys identify only ESTree child-node properties.
-	const fields = node as unknown as Readonly<Record<string, unknown>>;
-	for (const key of visitorKeys[node.type] ?? []) {
-		const value = fields[key];
-		if (isNode(value)) {
-			if (visitChildren || hasOffsetInRange(offsets, value.start, value.end)) {
-				collectTypeBindings(value, visitorKeys, offsets, visitChildren, collection);
-			}
-			continue;
-		}
-		if (!Array.isArray(value)) continue;
-		for (const child of value) {
-			if (
-				isNode(child) &&
-				(visitChildren || hasOffsetInRange(offsets, child.start, child.end))
-			) {
-				collectTypeBindings(child, visitorKeys, offsets, visitChildren, collection);
-			}
-		}
-	}
-}
-
-function collectProgramTypeBindings(
-	program: ESTree.Program,
-	visitorKeys: VisitorKeys,
-	sourceText: string,
-): BindingCollection {
-	const collection: BindingCollection = { aliases: [], bindingsByName: new Map() };
-	const offsets = bindingKeywordOffsets(sourceText);
-	if (offsets.length > 0) {
-		collectTypeBindings(program, visitorKeys, offsets, false, collection);
-	}
-	return collection;
-}
-
-/** Collect every lexical type alias and competing type binding in a program, on first use. */
-export function createTypeAliasEnvironment(
-	program: ESTree.Program,
-	visitorKeys: VisitorKeys,
-	sourceText: string,
-): TypeAliasEnvironment {
-	const cached = environmentsByProgram.get(program);
-	if (cached !== undefined) return cached;
-	let collection: BindingCollection | null = null;
-	const collected = (): BindingCollection =>
-		(collection ??= collectProgramTypeBindings(program, visitorKeys, sourceText));
-	const environment: TypeAliasEnvironment = {
-		get aliases() {
-			return collected().aliases;
-		},
-		get bindingsByName() {
-			return collected().bindingsByName;
-		},
-		visitorKeys,
+/** Visitors that record each declaration of a type name: aliases, interfaces, enums, classes, and imports. */
+export function typeBindingVisitors(environment: TypeAliasEnvironment) {
+	const addNamed = (
+		node: ESTree.TSInterfaceDeclaration | ESTree.TSEnumDeclaration | ESTree.Class,
+	) => {
+		if (node.id !== null) addBinding(environment, node.id.name, null, node);
 	};
-	environmentsByProgram.set(program, environment);
-	return environment;
+	const addImport = (
+		node: ESTree.ImportSpecifier | ESTree.ImportDefaultSpecifier | ESTree.ImportNamespaceSpecifier,
+	) => {
+		addBinding(environment, node.local.name, null, node);
+	};
+	return {
+		TSTypeAliasDeclaration(node: ESTree.TSTypeAliasDeclaration) {
+			addBinding(environment, node.id.name, node, node);
+		},
+		TSInterfaceDeclaration: addNamed,
+		TSEnumDeclaration: addNamed,
+		ClassDeclaration: addNamed,
+		ClassExpression: addNamed,
+		ImportSpecifier: addImport,
+		ImportDefaultSpecifier: addImport,
+		ImportNamespaceSpecifier: addImport,
+	};
 }
 
 function ancestorDistance(ancestor: ESTree.Node, node: ESTree.Node): number | null {
@@ -197,12 +105,11 @@ function ancestorDistance(ancestor: ESTree.Node, node: ESTree.Node): number | nu
 	return null;
 }
 
+/** The candidates in the nearest enclosing scope that declares any of them. */
 function nearestTypeBindings(
-	name: string,
+	candidates: readonly TypeBinding[],
 	use: ESTree.Node,
-	environment: TypeAliasEnvironment,
 ): readonly TypeBinding[] {
-	const candidates = environment.bindingsByName.get(name) ?? [];
 	let nearestDistance = Number.POSITIVE_INFINITY;
 	let nearest: TypeBinding[] = [];
 	for (const candidate of candidates) {
@@ -224,8 +131,11 @@ export function visibleTypeAlias(
 	use: ESTree.Node,
 	environment: TypeAliasEnvironment,
 ): ESTree.TSTypeAliasDeclaration | null {
-	if (lexicalTypeParameterNames(use, environment.visitorKeys).has(name)) return null;
-	const bindings = nearestTypeBindings(name, use, environment);
+	// Most names have no local declaration; skip the ancestor walk for them.
+	const candidates = environment.bindingsByName.get(name);
+	if (candidates === undefined) return null;
+	if (hasLexicalTypeParameter(use, name, environment.visitorKeys)) return null;
+	const bindings = nearestTypeBindings(candidates, use);
 	return bindings.length === 1 ? (bindings[0]?.alias ?? null) : null;
 }
 
@@ -235,9 +145,10 @@ export function hasVisibleTypeBinding(
 	use: ESTree.Node,
 	environment: TypeAliasEnvironment,
 ): boolean {
+	const candidates = environment.bindingsByName.get(name);
 	return (
-		lexicalTypeParameterNames(use, environment.visitorKeys).has(name) ||
-		nearestTypeBindings(name, use, environment).length > 0
+		(candidates !== undefined && nearestTypeBindings(candidates, use).length > 0) ||
+		hasLexicalTypeParameter(use, name, environment.visitorKeys)
 	);
 }
 
@@ -304,5 +215,5 @@ export function resolvedTypeMatches(
 		);
 	};
 
-	return evaluate(type, new Map(), new Set());
+	return evaluate(type, NO_SUBSTITUTIONS, NO_ALIASES);
 }

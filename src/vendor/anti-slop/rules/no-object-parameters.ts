@@ -8,7 +8,9 @@ import {
 } from "../shared/function-parameters.ts";
 import {
 	createTypeAliasEnvironment,
+	resetTypeAliasEnvironment,
 	resolvedTypeMatches,
+	typeBindingVisitors,
 	type TypeAliasEnvironment,
 } from "../shared/type-alias-resolution.ts";
 type ParameterOwner =
@@ -34,10 +36,11 @@ export const noObjectParametersRule = defineRule({
 		},
 	},
 	createOnce(context) {
-		let environment: TypeAliasEnvironment | null = null;
+		const environment: TypeAliasEnvironment = createTypeAliasEnvironment();
+		// Aliases may be declared after their use, so parameters are checked at exit, in visit order.
+		const owners: Array<ParameterOwner> = [];
 
 		const resolvesToObject = (type: ESTree.TSType): boolean =>
-			environment !== null &&
 			resolvedTypeMatches(type, environment, (resolved, matches) => {
 				if (resolved.type === "TSObjectKeyword") return true;
 				if (resolved.type === "TSParenthesizedType") {
@@ -61,24 +64,29 @@ export const noObjectParametersRule = defineRule({
 			}
 		};
 
+		const addOwner = (node: ParameterOwner) => {
+			if (node.params.length > 0) owners.push(node);
+		};
+
 		return {
-			Program(node) {
-				environment = createTypeAliasEnvironment(
-					node,
-					context.sourceCode.visitorKeys,
-					context.sourceCode.text,
-				);
+			...typeBindingVisitors(environment),
+			before() {
+				resetTypeAliasEnvironment(environment, context.sourceCode.visitorKeys);
+				owners.length = 0;
 			},
-			ArrowFunctionExpression: checkParameters,
-			FunctionDeclaration: checkParameters,
-			FunctionExpression: checkParameters,
-			TSCallSignatureDeclaration: checkParameters,
-			TSConstructSignatureDeclaration: checkParameters,
-			TSConstructorType: checkParameters,
-			TSDeclareFunction: checkParameters,
-			TSEmptyBodyFunctionExpression: checkParameters,
-			TSFunctionType: checkParameters,
-			TSMethodSignature: checkParameters,
+			ArrowFunctionExpression: addOwner,
+			FunctionDeclaration: addOwner,
+			FunctionExpression: addOwner,
+			TSCallSignatureDeclaration: addOwner,
+			TSConstructSignatureDeclaration: addOwner,
+			TSConstructorType: addOwner,
+			TSDeclareFunction: addOwner,
+			TSEmptyBodyFunctionExpression: addOwner,
+			TSFunctionType: addOwner,
+			TSMethodSignature: addOwner,
+			"Program:exit"() {
+				for (const node of owners) checkParameters(node);
+			},
 		};
 	},
 });

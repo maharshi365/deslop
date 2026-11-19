@@ -53,8 +53,9 @@ export const noDuplicateTypesRule = defineRule({
 		};
 		const inspectType = (node: TypeDeclaration) => {
 			const properties = node.type === "TSTypeAliasDeclaration" ? node.typeAnnotation.type === "TSTypeLiteral" ? node.typeAnnotation.members.length : 0 : node.body.body.length;
+			if (properties < minProperties()) return;
 			const fingerprint = canonicalDeclaration(node);
-			if (fingerprint !== null && properties >= minProperties()) report(node, node.id.name, fingerprint, "type");
+			if (fingerprint !== null) report(node, node.id.name, fingerprint, "type");
 		};
 		const inspectSchema = (node: ESTree.VariableDeclarator) => {
 			// Every schema form is a call, and needs a library binding imported earlier in the file.

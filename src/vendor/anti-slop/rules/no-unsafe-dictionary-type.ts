@@ -4,9 +4,11 @@ import {
 	classifyUnsafeDictionary,
 	classifyUnsafeDictionaryValue,
 	createTypeEnvironment,
+	resetTypeEnvironment,
 	type TypeEnvironment,
+	type UnsafeDictionary,
 } from "../shared/dictionary-types.ts";
-import { visibleTypeAlias } from "../shared/type-alias-resolution.ts";
+import { typeBindingVisitors, visibleTypeAlias } from "../shared/type-alias-resolution.ts";
 
 import type { ESTree } from "@oxlint/plugins";
 
@@ -88,17 +90,19 @@ function isInsideTypeParameterConstraint(node: ESTree.TSType): boolean {
 	return false;
 }
 
-function shouldReportType(node: ESTree.TSType, environment: TypeEnvironment): boolean {
-	if (isInsideTypeParameterConstraint(node)) return false;
-	if (isPlainAliasConsumerUse(node, environment)) return false;
-	if (classifyUnsafeDictionary(node, environment) === null) return false;
+/** The unsafe dictionary to report at this type, or null. The cheap, usually decisive test runs first. */
+function reportableDictionary(node: ESTree.TSType, environment: TypeEnvironment): UnsafeDictionary | null {
+	const unsafe = classifyUnsafeDictionary(node, environment);
+	if (unsafe === null) return null;
+	if (isInsideTypeParameterConstraint(node)) return null;
+	if (isPlainAliasConsumerUse(node, environment)) return null;
 	let current: ESTree.Node | null = node.parent;
 	while (current !== null && current.type !== "Program") {
 		if (isTypeNode(current) && classifyUnsafeDictionary(current, environment) !== null)
-			return false;
+			return null;
 		current = current.parent;
 	}
-	return true;
+	return unsafe;
 }
 
 /** Disallow object-dictionary contracts whose direct value type is an unsafe escape hatch. */
@@ -115,40 +119,35 @@ export const noUnsafeDictionaryTypeRule = defineRule({
 		},
 	},
 	createOnce(context) {
-		let environment: TypeEnvironment | null = null;
+		const environment = createTypeEnvironment();
+		// Aliases may be declared after their use, so types are checked at exit, in visit order.
+		const types: Array<ESTree.TSType | ESTree.TSIndexSignature> = [];
 		const report = (node: ESTree.Node, value: string) => {
 			context.report({ node, messageId: "unsafeDictionary", data: { value } });
 		};
-		const reportIfUnsafe = (node: ESTree.TSType) => {
-			if (environment === null || !shouldReportType(node, environment)) return;
-			const unsafe = classifyUnsafeDictionary(node, environment);
-			if (unsafe === null) return;
-			report(node, unsafe.unsafeValue);
+		const addType = (node: ESTree.TSType) => {
+			types.push(node);
 		};
 
 		return {
+			...typeBindingVisitors(environment.typeAliases),
 			Program(node) {
-				environment = createTypeEnvironment(
-					node,
-					context.sourceCode.visitorKeys,
-					context.sourceCode.text,
-				);
+				resetTypeEnvironment(environment, node, context.sourceCode.visitorKeys);
+				types.length = 0;
 			},
-			TSTypeReference: reportIfUnsafe,
-			TSTypeLiteral: reportIfUnsafe,
-			TSMappedType: reportIfUnsafe,
+			TSTypeReference: addType,
+			TSTypeLiteral: addType,
+			TSMappedType: addType,
 			TSIndexSignature(node) {
-				if (
-					environment === null ||
-					node.typeAnnotation === null ||
-					node.parent.type === "TSTypeLiteral"
-				)
-					return;
-				const unsafe = classifyUnsafeDictionaryValue(
-					node.typeAnnotation.typeAnnotation,
-					environment,
-				);
-				if (unsafe !== null) report(node, unsafe.unsafeValue);
+				if (node.typeAnnotation !== null && node.parent.type !== "TSTypeLiteral") types.push(node);
+			},
+			"Program:exit"() {
+				for (const node of types) {
+					const unsafe = node.type === "TSIndexSignature"
+						? classifyUnsafeDictionaryValue(node.typeAnnotation!.typeAnnotation, environment)
+						: reportableDictionary(node, environment);
+					if (unsafe !== null) report(node, unsafe.unsafeValue);
+				}
 			},
 		};
 	},

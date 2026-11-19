@@ -325,14 +325,15 @@ export const noWidenThenAssertRule = defineRule({
     },
   },
   createOnce(context) {
-    let fileScopes: Parameters<typeof resolvedVariableForIdentifier>[0] | null = null;
+    // Names of `const` bindings declared with a broad type. A report needs one declared before the
+    // assertion, and declarators are visited before every node that follows them.
+    const broadNames = new Set<string>();
 
     const checkAssertion = (node: ESTree.TSAsExpression | ESTree.TSTypeAssertion) => {
       const expression = assertedExpression(node);
-      if (expression.type !== "Identifier") return;
+      if (expression.type !== "Identifier" || !broadNames.has(expression.name)) return;
 
-      // Scope analysis is costly; read it only once a candidate assertion exists.
-      const scopes = (fileScopes ??= context.sourceCode.scopeManager.scopes);
+      const scopes = context.sourceCode.scopeManager.scopes;
       const variable = resolvedVariableForIdentifier(scopes, expression);
       if (variable === null) return;
       const widened = widenedBinding(variable, scopes);
@@ -359,7 +360,18 @@ export const noWidenThenAssertRule = defineRule({
 
     return {
       Program() {
-        fileScopes = null;
+        broadNames.clear();
+      },
+      VariableDeclarator(node) {
+        if (node.parent.type !== "VariableDeclaration" || node.parent.kind !== "const" || node.id.type !== "Identifier" || node.init === null) return;
+        const declaredType = node.id.typeAnnotation?.typeAnnotation;
+        const assertion = assertionFromExpression(node.init);
+        if (
+          (declaredType !== undefined && broadTypeKind(declaredType) !== null) ||
+          (assertion !== null && broadTypeKind(assertion.typeAnnotation) !== null)
+        ) {
+          broadNames.add(node.id.name);
+        }
       },
       TSAsExpression: checkAssertion,
       TSTypeAssertion: checkAssertion,

@@ -1,6 +1,8 @@
 import { defineRule } from "@oxlint/plugins";
 import type { ESTree, Reference, Scope } from "@oxlint/plugins";
 
+import { moduleScopeNames } from "./shared/module-scope.ts";
+
 function moduleScopeFor(scope: Scope): Scope | null {
 	let current: Scope | null = scope;
 	while (current !== null) {
@@ -100,42 +102,58 @@ export const noRenamedImportsRule = defineRule({
 		schema: [],
 	},
 	createOnce(context) {
+		const aliases: Array<ESTree.ImportSpecifier> = [];
+
+		function check(node: ESTree.ImportSpecifier, name: string, declared: ReadonlySet<string> | null) {
+			// A top-level import whose name the module already declares cannot be reported. Skipping
+			// it here avoids scope analysis, which the report and its fix still need.
+			if (declared !== null && node.parent.parent?.type === "Program" && declared.has(name)) return;
+
+			const moduleScope = moduleScopeFor(context.sourceCode.getScope(node));
+			if (moduleScope === null || moduleScope.set.has(name)) return;
+
+			const variable = moduleScope.set.get(node.local.name);
+			if (variable === undefined) return;
+
+			context.report({
+				node,
+				messageId: "unnecessaryAlias",
+				data: { importedName: name, localName: node.local.name },
+				fix(fixer) {
+					const localName = node.local.name;
+					const references = variable.references.filter((reference) => reference.resolved === variable);
+					if (
+						reservedBindingNames.has(name) ||
+						moduleScope.through.some((reference) => reference.identifier.name === name) ||
+						references.some(
+							(reference) =>
+								isShadowedAt(reference, name, moduleScope) || isIntrinsicJsxTag(reference.identifier, name),
+						)
+					) {
+						return null;
+					}
+					return [
+						fixer.replaceTextRange([node.imported.range[0], node.range[1]], name),
+						...references.map((reference) =>
+							fixer.replaceText(reference.identifier, referenceReplacement(reference.identifier, localName, name)),
+						),
+					];
+				},
+			});
+		}
+
 		return {
+			before() {
+				aliases.length = 0;
+			},
 			ImportSpecifier(node) {
 				const name = importedName(node);
-				if (name === null || name === node.local.name) return;
-
-				const moduleScope = moduleScopeFor(context.sourceCode.getScope(node));
-				if (moduleScope === null || moduleScope.set.has(name)) return;
-
-				const variable = moduleScope.set.get(node.local.name);
-				if (variable === undefined) return;
-
-				context.report({
-					node,
-					messageId: "unnecessaryAlias",
-					data: { importedName: name, localName: node.local.name },
-					fix(fixer) {
-						const localName = node.local.name;
-						const references = variable.references.filter((reference) => reference.resolved === variable);
-						if (
-							reservedBindingNames.has(name) ||
-							moduleScope.through.some((reference) => reference.identifier.name === name) ||
-							references.some(
-								(reference) =>
-									isShadowedAt(reference, name, moduleScope) || isIntrinsicJsxTag(reference.identifier, name),
-							)
-						) {
-							return null;
-						}
-						return [
-							fixer.replaceTextRange([node.imported.range[0], node.range[1]], name),
-							...references.map((reference) =>
-								fixer.replaceText(reference.identifier, referenceReplacement(reference.identifier, localName, name)),
-							),
-						];
-					},
-				});
+				if (name !== null && name !== node.local.name) aliases.push(node);
+			},
+			"Program:exit"(program) {
+				if (aliases.length === 0) return;
+				const declared = moduleScopeNames(program);
+				for (const node of aliases) check(node, importedName(node)!, declared);
 			},
 		};
 	},

@@ -18,6 +18,10 @@ const ab = message("x", "string", '"a" and "b"', '"a" | "b"');
 
 ruleTester.run("prefer-literal-union", preferLiteralUnionRule, {
 	valid: [
+		{
+			name: "keeps same-named variables apart when each is compared to one literal",
+			code: 'function f(x: string) { return x === "a"; }\nfunction g(x: string) { return x === "b"; }',
+		},
 		'function f(x: "a" | "b") { if (x === "a") return 1; if (x === "b") return 2; }',
 		'type Mode = "a" | "b"; function f(x: Mode) { if (x === "a") return 1; if (x === "b") return 2; }',
 		'import type { Props } from "./props"; function F({ x }: Props) { if (x === "a") return 1; if (x === "b") return 2; }',

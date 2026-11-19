@@ -5,6 +5,7 @@ import {
 	classifyWideningTarget,
 	createTypeEnvironment,
 	isKnownEvidenceExpression,
+	resetTypeEnvironment,
 	type TypeEnvironment,
 	type WideningTarget,
 } from "../shared/dictionary-types.ts";
@@ -14,12 +15,21 @@ import {
 	functionParameterTypeAnnotation,
 } from "../shared/function-parameters.ts";
 import { resolveVariable } from "../shared/scope.ts";
+import { typeBindingVisitors } from "../shared/type-alias-resolution.ts";
 
 import type { ESTree, SourceCode, Variable } from "@oxlint/plugins";
 
 type FunctionExpression = ESTree.ArrowFunctionExpression | ESTree.Function;
 
-const TYPE_PREDICATE_KEYWORD = /\b(?:asserts|is)\b/;
+// Kinds of pending checks. A flow kind also names how its report describes the subject.
+const BINDING_SUBJECT = 0;
+const PROPERTY_SUBJECT = 1;
+const RETURN_SUBJECT = 2;
+const ASSERTION_SUBJECT = 3;
+const ASSIGNMENT_CHECK = 4;
+const CALL_CHECK = 5;
+// A declarator without an initializer: no check, but its annotation can make assignments flows.
+const DECLARATION = 6;
 
 function unwrapExpression(expression: ESTree.Expression): ESTree.Expression {
 	let current = expression;
@@ -54,11 +64,13 @@ function isStableConstVariable(variable: Variable, declarator: ESTree.VariableDe
 function hasKnownEvidence(
 	sourceCode: SourceCode,
 	expression: ESTree.Expression,
+	constNames: ReadonlySet<string>,
 	visitedVariables = new Set<Variable>(),
 ): boolean {
 	if (isKnownEvidenceExpression(expression)) return true;
 	const unwrapped = unwrapExpression(expression);
-	if (unwrapped.type !== "Identifier") return false;
+	// Evidence flows only through `const` bindings with initializers; skip scope analysis otherwise.
+	if (unwrapped.type !== "Identifier" || !constNames.has(unwrapped.name)) return false;
 	const variable = resolveVariable(sourceCode, unwrapped);
 	if (variable === null || visitedVariables.has(variable)) return false;
 	const declarator = variableDeclarator(variable);
@@ -70,7 +82,39 @@ function hasKnownEvidence(
 		return false;
 	}
 	visitedVariables.add(variable);
-	return hasKnownEvidence(sourceCode, declarator.init, visitedVariables);
+	return hasKnownEvidence(sourceCode, declarator.init, constNames, visitedVariables);
+}
+
+/** Add every name a binding pattern declares. */
+function addBindingNames(pattern: ESTree.Node, names: Set<string>): void {
+	switch (pattern.type) {
+		case "Identifier":
+			names.add(pattern.name);
+			return;
+		case "ObjectPattern":
+			for (const property of pattern.properties) addBindingNames(property.type === "RestElement" ? property : property.value, names);
+			return;
+		case "ArrayPattern":
+			for (const element of pattern.elements) if (element !== null) addBindingNames(element, names);
+			return;
+		case "AssignmentPattern":
+			addBindingNames(pattern.left, names);
+			return;
+		case "RestElement":
+			addBindingNames(pattern.argument, names);
+			return;
+		default:
+			return;
+	}
+}
+
+/** Whether `hasKnownEvidence` can be true for this expression, without scope analysis. */
+function mayCarryEvidence(expression: ESTree.Expression): boolean {
+	return isKnownEvidenceExpression(expression) || unwrapExpression(expression).type === "Identifier";
+}
+
+function isTypePredicateFunction(node: ESTree.Node): boolean {
+	return isFunctionExpression(node) && node.returnType?.typeAnnotation.type === "TSTypePredicate";
 }
 
 function isFunctionExpression(node: ESTree.Node): node is FunctionExpression {
@@ -274,149 +318,194 @@ export const noKnownValueWideningRule = defineRule({
 		},
 	},
 	createOnce(context) {
-		let environment: TypeEnvironment | null = null;
-		let hasTypePredicateKeyword: boolean | null = null;
+		const environment = createTypeEnvironment();
 
-		const reportFlow = (
+		// Checks that may need scope analysis wait for Program:exit, when these name sets are
+		// complete; a name outside them cannot produce a report. They run in visit order.
+		const constNames = new Set<string>();
+		const annotatedNames = new Set<string>();
+		const predicateNames = new Set<string>();
+		// Pending checks as parallel arrays. A flow stores its destination type, which is classified
+		// at exit because the type aliases it may use can be declared later in the file.
+		const kinds: Array<number> = [];
+		const nodes: Array<ESTree.Node | null> = [];
+		const types: Array<ESTree.TSType | null> = [];
+		const subjects: Array<ESTree.Node | null> = [];
+		const targets: Array<WideningTarget | null> = [];
+
+		const push = (kind: number, node: ESTree.Node | null, type: ESTree.TSType | null, subject: ESTree.Node | null) => {
+			kinds.push(kind);
+			nodes.push(node);
+			types.push(type);
+			subjects.push(subject);
+		};
+
+		const flow = (
 			expression: ESTree.Expression,
-			destination: WideningTarget | null,
-			subject: string,
+			annotation: ESTree.TSTypeAnnotation | null | undefined,
+			subjectKind: number,
+			subject: ESTree.Node | null,
 		) => {
-			if (destination === null) return;
-			if (
-				isDictionaryAccumulatorTarget(destination) &&
-				isEmptyObjectExpression(expression)
-			) {
-				return;
+			if (annotation !== null && annotation !== undefined) push(subjectKind, expression, annotation.typeAnnotation, subject);
+		};
+
+		const subjectText = (kind: number, subject: ESTree.Node | null): string => {
+			switch (kind) {
+				case BINDING_SUBJECT:
+					return `binding \`${(subject as ESTree.BindingIdentifier).name}\``;
+				case PROPERTY_SUBJECT:
+					return `property \`${sourceKeyName(context.sourceCode, subject as ESTree.PropertyKey)}\``;
+				case RETURN_SUBJECT:
+					return `return value of \`${functionName(context.sourceCode, subject as FunctionExpression | null)}\``;
+				default:
+					return "assertion";
 			}
-			if (!hasKnownEvidence(context.sourceCode, expression)) return;
+		};
+
+		const reportFlow = (expression: ESTree.Expression, destination: WideningTarget, subject: () => string) => {
+			if (!hasKnownEvidence(context.sourceCode, expression, constNames)) return;
 			context.report({
 				node: expression,
 				messageId: "widening",
-				data: { subject, target: destination.kind },
+				data: { subject: subject(), target: destination.kind },
 			});
 		};
 
-		const targetFromAnnotation = (annotation: ESTree.TSTypeAnnotation | null | undefined) =>
-			environment === null ? null : annotationTarget(annotation, environment);
+		const checkAssignment = (node: ESTree.AssignmentExpression, environment: TypeEnvironment) => {
+			if (node.left.type !== "Identifier" || !annotatedNames.has(node.left.name)) return;
+			const right = unwrapExpression(node.right);
+			if (!isKnownEvidenceExpression(node.right) && (right.type !== "Identifier" || !constNames.has(right.name))) return;
+			const variable = resolveVariable(context.sourceCode, node.left);
+			if (variable === null) return;
+			const declarator = variableDeclarator(variable);
+			if (declarator === null || declarator.id.type !== "Identifier") return;
+			const destination = annotationTarget(declarator.id.typeAnnotation, environment);
+			if (destination === null) return;
+			if (isDictionaryAccumulatorTarget(destination) && isEmptyObjectExpression(node.right)) return;
+			const name = declarator.id.name;
+			reportFlow(node.right, destination, () => `binding \`${name}\``);
+		};
+
+		const checkCall = (node: ESTree.CallExpression, environment: TypeEnvironment) => {
+			// A report needs a local function with a type predicate (`x is T` or `asserts x`).
+			const callee = unwrapExpression(node.callee);
+			if (!isFunctionExpression(callee) && (callee.type !== "Identifier" || !predicateNames.has(callee.name))) return;
+			const owner = localFunctionForCall(context.sourceCode, node.callee);
+			if (owner === null) return;
+			const parameterIndex = typePredicateSubjectIndex(context.sourceCode, owner);
+			if (parameterIndex === null) return;
+			const parameter = owner.params[parameterIndex];
+			const argument = node.arguments[parameterIndex];
+			if (parameter === undefined || argument === undefined || argument.type === "SpreadElement") {
+				return;
+			}
+			const parameterAnnotation = functionParameterTypeAnnotation(parameter);
+			if (
+				parameterAnnotation === null ||
+				parameterAnnotation === undefined ||
+				!containsUnknownType(parameterAnnotation.typeAnnotation)
+			) {
+				return;
+			}
+			if (
+				!hasKnownCallArgumentEvidence(
+					context.sourceCode,
+					argument,
+					environment,
+				)
+			) {
+				return;
+			}
+			context.report({
+				node: argument,
+				messageId: "widening",
+				data: {
+					subject: `argument for parameter \`${functionParameterBindingName(parameter, context.sourceCode)}\` of \`${functionName(context.sourceCode, owner)}\``,
+					target: "unknown",
+				},
+			});
+		};
+
+		const addPredicateFunction = (node: ESTree.Function) => {
+			if (node.id !== null && isTypePredicateFunction(node)) predicateNames.add(node.id.name);
+		};
 
 		return {
+			...typeBindingVisitors(environment.typeAliases),
 			Program(node) {
-				hasTypePredicateKeyword = null;
-				environment = createTypeEnvironment(
-					node,
-					context.sourceCode.visitorKeys,
-					context.sourceCode.text,
-				);
+				constNames.clear();
+				annotatedNames.clear();
+				predicateNames.clear();
+				kinds.length = 0;
+				nodes.length = 0;
+				types.length = 0;
+				subjects.length = 0;
+				resetTypeEnvironment(environment, node, context.sourceCode.visitorKeys);
 			},
 			VariableDeclarator(node) {
-				if (node.init === null || node.id.type !== "Identifier") return;
-				reportFlow(
-					node.init,
-					targetFromAnnotation(node.id.typeAnnotation),
-					`binding \`${node.id.name}\``,
-				);
+				if (node.init !== null) {
+					// Only an initializer with evidence, or another binding, can give a const evidence.
+					if (node.parent.type === "VariableDeclaration" && node.parent.kind === "const" && mayCarryEvidence(node.init)) {
+						addBindingNames(node.id, constNames);
+					}
+					if (isTypePredicateFunction(unwrapExpression(node.init))) addBindingNames(node.id, predicateNames);
+				}
+				const annotation = node.id.type === "Identifier" ? node.id.typeAnnotation : null;
+				if (annotation === null || annotation === undefined) return;
+				push(node.init === null ? DECLARATION : BINDING_SUBJECT, node.init, annotation.typeAnnotation, node.id);
 			},
+			FunctionDeclaration: addPredicateFunction,
+			FunctionExpression: addPredicateFunction,
+			TSDeclareFunction: addPredicateFunction,
 			PropertyDefinition(node) {
-				if (node.value === null) return;
-				reportFlow(
-					node.value,
-					targetFromAnnotation(node.typeAnnotation),
-					`property \`${sourceKeyName(context.sourceCode, node.key)}\``,
-				);
+				if (node.value !== null) flow(node.value, node.typeAnnotation, PROPERTY_SUBJECT, node.key);
 			},
 			AccessorProperty(node) {
-				if (node.value === null) return;
-				reportFlow(
-					node.value,
-					targetFromAnnotation(node.typeAnnotation),
-					`property \`${sourceKeyName(context.sourceCode, node.key)}\``,
-				);
+				if (node.value !== null) flow(node.value, node.typeAnnotation, PROPERTY_SUBJECT, node.key);
 			},
 			AssignmentExpression(node) {
-				if (node.operator !== "=" || node.left.type !== "Identifier") return;
-				const variable = resolveVariable(context.sourceCode, node.left);
-				if (variable === null) return;
-				const declarator = variableDeclarator(variable);
-				if (declarator === null || declarator.id.type !== "Identifier") return;
-				reportFlow(
-					node.right,
-					targetFromAnnotation(declarator.id.typeAnnotation),
-					`binding \`${declarator.id.name}\``,
-				);
+				if (node.operator === "=" && node.left.type === "Identifier") push(ASSIGNMENT_CHECK, node, null, null);
 			},
 			CallExpression(node) {
-				if (environment === null) return;
-				// A report needs a local type predicate (`x is T` or `asserts x`) in this file.
-				hasTypePredicateKeyword ??= TYPE_PREDICATE_KEYWORD.test(context.sourceCode.text);
-				if (!hasTypePredicateKeyword) return;
-				const owner = localFunctionForCall(context.sourceCode, node.callee);
-				if (owner === null) return;
-				const parameterIndex = typePredicateSubjectIndex(context.sourceCode, owner);
-				if (parameterIndex === null) return;
-				const parameter = owner.params[parameterIndex];
-				const argument = node.arguments[parameterIndex];
-				if (parameter === undefined || argument === undefined || argument.type === "SpreadElement") {
-					return;
-				}
-				const parameterAnnotation = functionParameterTypeAnnotation(parameter);
-				if (
-					parameterAnnotation === null ||
-					parameterAnnotation === undefined ||
-					!containsUnknownType(parameterAnnotation.typeAnnotation)
-				) {
-					return;
-				}
-				if (
-					!hasKnownCallArgumentEvidence(
-						context.sourceCode,
-						argument,
-						environment,
-					)
-				) {
-					return;
-				}
-				context.report({
-					node: argument,
-					messageId: "widening",
-					data: {
-						subject: `argument for parameter \`${functionParameterBindingName(parameter, context.sourceCode)}\` of \`${functionName(context.sourceCode, owner)}\``,
-						target: "unknown",
-					},
-				});
+				const callee = unwrapExpression(node.callee);
+				if (callee.type === "Identifier" || isFunctionExpression(callee)) push(CALL_CHECK, node, null, null);
 			},
 			ReturnStatement(node) {
 				if (node.argument === null) return;
 				const owner = enclosingFunction(node);
-				reportFlow(
-					node.argument,
-					targetFromAnnotation(owner?.returnType),
-					`return value of \`${functionName(context.sourceCode, owner)}\``,
-				);
+				flow(node.argument, owner?.returnType, RETURN_SUBJECT, owner);
 			},
 			ArrowFunctionExpression(node) {
-				if (node.body.type === "BlockStatement") return;
-				reportFlow(
-					node.body,
-					targetFromAnnotation(node.returnType),
-					`return value of \`${functionName(context.sourceCode, node)}\``,
-				);
+				if (node.body.type !== "BlockStatement") flow(node.body, node.returnType, RETURN_SUBJECT, node);
 			},
 			TSAsExpression(node) {
-				if (environment === null || hasParentAssertion(node)) return;
-				reportFlow(
-					node.expression,
-					classifyWideningTarget(node.typeAnnotation, environment),
-					"assertion",
-				);
+				if (!hasParentAssertion(node)) push(ASSERTION_SUBJECT, node.expression, node.typeAnnotation, null);
 			},
 			TSTypeAssertion(node) {
-				if (environment === null || hasParentAssertion(node)) return;
-				reportFlow(
-					node.expression,
-					classifyWideningTarget(node.typeAnnotation, environment),
-					"assertion",
-				);
+				if (!hasParentAssertion(node)) push(ASSERTION_SUBJECT, node.expression, node.typeAnnotation, null);
+			},
+			"Program:exit"() {
+				// Classify every destination first: assignments need the complete annotated names.
+				targets.length = kinds.length;
+				for (let i = 0; i < kinds.length; i++) {
+					const type = types[i];
+					targets[i] = type === null ? null : classifyWideningTarget(type, environment);
+					if ((kinds[i] === BINDING_SUBJECT || kinds[i] === DECLARATION) && targets[i] !== null) {
+						annotatedNames.add((subjects[i] as ESTree.BindingIdentifier).name);
+					}
+				}
+				for (let i = 0; i < kinds.length; i++) {
+					const kind = kinds[i];
+					if (kind === ASSIGNMENT_CHECK) checkAssignment(nodes[i] as ESTree.AssignmentExpression, environment);
+					else if (kind === CALL_CHECK) checkCall(nodes[i] as ESTree.CallExpression, environment);
+					else if (kind !== DECLARATION) {
+						const destination = targets[i];
+						const expression = nodes[i] as ESTree.Expression;
+						if (destination === null) continue;
+						if (isDictionaryAccumulatorTarget(destination) && isEmptyObjectExpression(expression)) continue;
+						reportFlow(expression, destination, () => subjectText(kind, subjects[i]));
+					}
+				}
 			},
 		};
 	},

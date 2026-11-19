@@ -7,6 +7,26 @@ type TypeDeclaration = ESTree.TSTypeAliasDeclaration | ESTree.TSInterfaceDeclara
 
 type Comparisons = Map<Variable, Set<string>>;
 
+/** Type names declared in this file, as parallel arrays. A 
+ull node is a non-alias type binding. */
+interface TypeDeclarations {
+	readonly names: Array<string>;
+	readonly nodes: Array<TypeDeclaration>;
+}
+
+/** The declaration for 
+ame when exactly one binding declares it. */
+function onlyDeclaration(declarations: TypeDeclarations, name: string): TypeDeclaration | undefined {
+	let found: TypeDeclaration | undefined;
+	let count = 0;
+	for (let i = 0; i < declarations.names.length; i++) {
+		if (declarations.names[i] !== name) continue;
+		if (++count > 1) return undefined;
+		found = declarations.nodes[i];
+	}
+	return found;
+}
+
 const EQUALITY_OPERATORS = new Set(["===", "!==", "==", "!="]);
 
 function stringLiteralValue(node: ESTree.Node | null): string | null {
@@ -60,7 +80,7 @@ function annotationType(node: ESTree.Node): ESTree.TSType | null {
 /** Return the declared type of a binding inside `{ key }: Type`, resolving `Type` to an inline type literal or a single local alias or interface. */
 function destructuredPropertyType(
 	identifier: ESTree.Node,
-	typeDeclarations: ReadonlyMap<string, TypeDeclaration[]>,
+	typeDeclarations: TypeDeclarations,
 ): ESTree.TSType | null {
 	let value: ESTree.Node = identifier;
 	if (value.parent?.type === "AssignmentPattern" && value.parent.left === value) value = value.parent;
@@ -77,9 +97,7 @@ function destructuredPropertyType(
 	if (container.type !== "TSTypeReference" || container.typeName.type !== "Identifier") return null;
 	if (container.typeArguments) return null;
 
-	const declarations = typeDeclarations.get(container.typeName.name);
-	if (declarations?.length !== 1) return null;
-	const declaration = declarations[0];
+	const declaration = onlyDeclaration(typeDeclarations, container.typeName.name);
 	if (declaration === null || declaration === undefined) return null;
 	if (declaration.type === "TSInterfaceDeclaration") return memberType(declaration.body.body, name);
 	if (declaration.typeAnnotation.type !== "TSTypeLiteral") return null;
@@ -99,7 +117,7 @@ function isUseStateCallee(callee: ESTree.Node): boolean {
 /** Return the type written for a variable in this file, or null when it is inferred or comes from elsewhere. */
 function declaredType(
 	variable: Variable,
-	typeDeclarations: ReadonlyMap<string, TypeDeclaration[]>,
+	typeDeclarations: TypeDeclarations,
 ): { readonly name: ESTree.Node; readonly type: ESTree.TSType } | null {
 	if (variable.defs.length !== 1) return null;
 	const definition = variable.defs[0];
@@ -133,6 +151,26 @@ function declaredType(
 	return type === null ? null : { name, type };
 }
 
+/**
+ * Add the names `declaredType` can find a string type for: bindings annotated `string`,
+ * `string | null`, or `string | undefined`, and direct properties of an annotated `{ ... }: T`.
+ */
+function addTypedNames(pattern: ESTree.Node, names: Set<string>): void {
+	if (pattern.type === "TSParameterProperty") pattern = pattern.parameter;
+	if (pattern.type === "AssignmentPattern") pattern = pattern.left;
+	if (pattern.type === "Identifier") {
+		const type = annotationType(pattern);
+		if (type !== null && nullableStringExtras(type) !== null) names.add(pattern.name);
+		return;
+	}
+	if (pattern.type !== "ObjectPattern" || annotationType(pattern) === null) return;
+	for (const property of pattern.properties) {
+		if (property.type !== "Property") continue;
+		const value = property.value.type === "AssignmentPattern" ? property.value.left : property.value;
+		if (value.type === "Identifier") names.add(value.name);
+	}
+}
+
 function formatLiterals(literals: readonly string[]): string {
 	const quoted = literals.map((literal) => JSON.stringify(literal));
 	if (quoted.length === 2) return `${quoted[0]} and ${quoted[1]}`;
@@ -151,22 +189,49 @@ export const preferLiteralUnionRule = defineRule({
 		schema: [],
 	},
 	createOnce(context) {
-		let comparisons: Comparisons;
-		let typeDeclarations: Map<string, TypeDeclaration[]>;
+		// Local type names in visit order, read only for reported candidates.
+		const typeDeclarations: TypeDeclarations = { names: [], nodes: [] };
+		// Comparisons in source order. Resolution waits for exit, and only runs for names compared
+		// to at least two distinct literals; any variable with fewer cannot be reported.
+		const subjects: Array<ESTree.IdentifierReference> = [];
+		const literalsOf: Array<string> = [];
+		// Names with a string type written in this file; no other variable can be reported.
+		const typedNames = new Set<string>();
+
+		function addParameterNames(node: ESTree.Function | ESTree.ArrowFunctionExpression) {
+			for (const parameter of node.params) addTypedNames(parameter, typedNames);
+		}
 
 		function addTypeDeclaration(name: string, declaration: TypeDeclaration) {
-			const declarations = typeDeclarations.get(name);
-			if (declarations === undefined) typeDeclarations.set(name, [declaration]);
-			else declarations.push(declaration);
+			typeDeclarations.names.push(name);
+			typeDeclarations.nodes.push(declaration);
 		}
 
 		function addComparison(subject: ESTree.BinaryExpression["left"], literal: string | null) {
 			if (literal === null || subject.type !== "Identifier") return;
-			const variable = resolveVariable(context.sourceCode, subject);
-			if (variable === null) return;
-			const literals = comparisons.get(variable);
-			if (literals === undefined) comparisons.set(variable, new Set([literal]));
-			else literals.add(literal);
+			subjects.push(subject);
+			literalsOf.push(literal);
+		}
+
+		function resolveComparisons(): Comparisons {
+			const firstLiteral = new Map<string, string | null>();
+			for (let i = 0; i < subjects.length; i++) {
+				const name = subjects[i].name;
+				const first = firstLiteral.get(name);
+				// `null` marks a name with two or more distinct literals.
+				if (first === undefined) firstLiteral.set(name, literalsOf[i]);
+				else if (first !== null && first !== literalsOf[i]) firstLiteral.set(name, null);
+			}
+			const comparisons: Comparisons = new Map();
+			for (let i = 0; i < subjects.length; i++) {
+				if (firstLiteral.get(subjects[i].name) !== null || !typedNames.has(subjects[i].name)) continue;
+				const variable = resolveVariable(context.sourceCode, subjects[i]);
+				if (variable === null) continue;
+				const literals = comparisons.get(variable);
+				if (literals === undefined) comparisons.set(variable, new Set([literalsOf[i]]));
+				else literals.add(literalsOf[i]);
+			}
+			return comparisons;
 		}
 
 		function addLocalName(node: ESTree.ImportSpecifier | ESTree.ImportDefaultSpecifier | ESTree.ImportNamespaceSpecifier) {
@@ -175,8 +240,21 @@ export const preferLiteralUnionRule = defineRule({
 
 		return {
 			before() {
-				comparisons = new Map();
-				typeDeclarations = new Map();
+				subjects.length = 0;
+				literalsOf.length = 0;
+				typedNames.clear();
+				typeDeclarations.names.length = 0;
+				typeDeclarations.nodes.length = 0;
+			},
+			FunctionDeclaration: addParameterNames,
+			FunctionExpression: addParameterNames,
+			ArrowFunctionExpression: addParameterNames,
+			VariableDeclarator(node) {
+				addTypedNames(node.id, typedNames);
+				const state = node.init;
+				const first = node.id.type === "ArrayPattern" ? node.id.elements[0] : null;
+				const type = state?.type === "CallExpression" && isUseStateCallee(state.callee) ? state.typeArguments?.params[0] : undefined;
+				if (first?.type === "Identifier" && type !== undefined && nullableStringExtras(type) !== null) typedNames.add(first.name);
 			},
 			BinaryExpression(node) {
 				if (!EQUALITY_OPERATORS.has(node.operator)) return;
@@ -204,7 +282,8 @@ export const preferLiteralUnionRule = defineRule({
 			ImportDefaultSpecifier: addLocalName,
 			ImportNamespaceSpecifier: addLocalName,
 			"Program:exit"() {
-				for (const [variable, literalSet] of comparisons) {
+				if (subjects.length < 2) return;
+				for (const [variable, literalSet] of resolveComparisons()) {
 					if (literalSet.size < 2) continue;
 					const declaration = declaredType(variable, typeDeclarations);
 					if (declaration === null) continue;

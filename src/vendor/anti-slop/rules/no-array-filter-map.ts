@@ -1,6 +1,6 @@
 import { defineRule } from "@oxlint/plugins";
 
-import { arrayMethodTarget, isKnownArrayExpression, unwrapArrayExpression } from "../shared/array-method.ts";
+import { arrayMethodName, arrayMethodTarget, isKnownArrayExpression, unwrapArrayExpression } from "../shared/array-method.ts";
 
 /** Reject eager array filter/map pipelines; lazy iterator helpers remain allowed. */
 export const noArrayFilterMapRule = defineRule({
@@ -14,8 +14,9 @@ export const noArrayFilterMapRule = defineRule({
   createOnce(context) {
     return {
       CallExpression(node) {
-        const outer = arrayMethodTarget(node.callee);
-        if (outer === null || (outer.name !== "map" && outer.name !== "filter")) return;
+        const name = arrayMethodName(node.callee);
+        if (name !== "map" && name !== "filter") return;
+        const outer = arrayMethodTarget(node.callee)!;
         const innerCall = unwrapArrayExpression(outer.object);
         if (innerCall.type !== "CallExpression") return;
         const inner = arrayMethodTarget(innerCall.callee);

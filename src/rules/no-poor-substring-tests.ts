@@ -4,6 +4,7 @@ import { defineRule } from "@oxlint/plugins";
 import type { ESTree, SourceCode, Variable } from "@oxlint/plugins";
 
 import { resolveVariable } from "../vendor/anti-slop/shared/scope.ts";
+import { addBindingNames } from "./shared/module-scope.ts";
 
 const SUBSTRING_MATCHERS = new Set([
 	"toContain",
@@ -49,11 +50,6 @@ const ASSERT_MATCHERS = new Set([
 	"notMatch",
 ]);
 
-// Bounded, insertion-ordered cache. Entries are validated by mtime and size so that
-// long-lived processes (editor/LSP) see on-disk changes.
-const FILE_CONTENT_CACHE_LIMIT = 256;
-const fileContentCache = new Map<string, { mtimeMs: number; size: number; content: string }>();
-
 // TS ESM style: a `.js` specifier may refer to a `.ts` source file, etc.
 const SOURCE_EXTENSIONS_FOR_SPECIFIER: Record<string, Array<string>> = {
 	".js": [".ts", ".tsx"],
@@ -62,24 +58,9 @@ const SOURCE_EXTENSIONS_FOR_SPECIFIER: Record<string, Array<string>> = {
 	".cjs": [".cts"],
 };
 
-function readCachedFile(filePath: string): string | undefined {
+function readFile(filePath: string): string | undefined {
 	const stats = fs.statSync(filePath, { throwIfNoEntry: false });
-	if (!stats?.isFile()) {
-		fileContentCache.delete(filePath);
-		return undefined;
-	}
-	const cached = fileContentCache.get(filePath);
-	if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size) {
-		return cached.content;
-	}
-	const content = fs.readFileSync(filePath, "utf8");
-	fileContentCache.delete(filePath);
-	if (fileContentCache.size >= FILE_CONTENT_CACHE_LIMIT) {
-		const oldest = fileContentCache.keys().next().value;
-		if (oldest !== undefined) fileContentCache.delete(oldest);
-	}
-	fileContentCache.set(filePath, { mtimeMs: stats.mtimeMs, size: stats.size, content });
-	return content;
+	return stats?.isFile() ? fs.readFileSync(filePath, "utf8") : undefined;
 }
 
 function escapeRegExp(text: string): string {
@@ -173,7 +154,7 @@ function isImportedConstantString(variable: Variable, currentFilename?: string):
 
 	for (const candidate of candidates) {
 		try {
-			const content = readCachedFile(candidate);
+			const content = readFile(candidate);
 			if (content === undefined) continue;
 
 			if (pattern.test(content)) {
@@ -187,9 +168,34 @@ function isImportedConstantString(variable: Variable, currentFilename?: string):
 	return false;
 }
 
+/** Whether `isConstantString` can be true for this expression before any binding is resolved. */
+function mayBeConstantString(expression: ESTree.Expression): boolean {
+	const current = unwrapExpression(expression);
+	switch (current.type) {
+		case "Literal":
+			return typeof current.value === "string";
+		case "TemplateLiteral":
+		case "Identifier":
+			return true;
+		case "BinaryExpression":
+			return current.operator === "+";
+		case "CallExpression":
+			return current.callee.type === "Identifier" && current.callee.name === "String";
+		default:
+			return false;
+	}
+}
+
+/**
+ * Names that can resolve to a constant string: bindings of declarators whose initializer may be one,
+ * and imports from relative modules. Complete at Program:exit.
+ */
+type ConstantCandidates = ReadonlySet<string>;
+
 function isConstantString(
 	expression: ESTree.Expression,
 	sourceCode: SourceCode,
+	candidates: ConstantCandidates,
 	currentFilename?: string,
 	visited = new Set<Variable>(),
 ): boolean {
@@ -204,14 +210,14 @@ function isConstantString(
 			return true;
 		}
 		return current.expressions.every((expr) =>
-			isConstantString(expr, sourceCode, currentFilename, visited),
+			isConstantString(expr, sourceCode, candidates, currentFilename, visited),
 		);
 	}
 
 	if (current.type === "BinaryExpression" && current.operator === "+") {
 		return (
-			isConstantString(current.left, sourceCode, currentFilename, visited) &&
-			isConstantString(current.right, sourceCode, currentFilename, visited)
+			isConstantString(current.left, sourceCode, candidates, currentFilename, visited) &&
+			isConstantString(current.right, sourceCode, candidates, currentFilename, visited)
 		);
 	}
 
@@ -222,10 +228,11 @@ function isConstantString(
 		current.arguments.length === 1 &&
 		current.arguments[0]?.type !== "SpreadElement"
 	) {
-		return isConstantString(current.arguments[0], sourceCode, currentFilename, visited);
+		return isConstantString(current.arguments[0], sourceCode, candidates, currentFilename, visited);
 	}
 
-	if (current.type === "Identifier") {
+	// Scope analysis is only needed for a name that some declarator or relative import binds.
+	if (current.type === "Identifier" && candidates.has(current.name)) {
 		const variable = resolveVariable(sourceCode, current);
 		if (variable === null || visited.has(variable)) {
 			return false;
@@ -240,7 +247,7 @@ function isConstantString(
 			) {
 				if (isStableConstVariable(variable, def.node)) {
 					visited.add(variable);
-					return isConstantString(def.node.init, sourceCode, currentFilename, visited);
+					return isConstantString(def.node.init, sourceCode, candidates, currentFilename, visited);
 				}
 			}
 
@@ -334,84 +341,107 @@ export const noPoorSubstringTestsRule = defineRule({
 		schema: [],
 	},
 	createOnce(context) {
+		// Calls are checked at exit, in visit order, once every candidate binding name is known.
+		const calls: Array<ESTree.CallExpression> = [];
+		const candidates = new Set<string>();
+
+		function addImportedName(node: ESTree.ImportSpecifier | ESTree.ImportDefaultSpecifier) {
+			const declaration = node.parent;
+			if (declaration.type === "ImportDeclaration" && declaration.source.value.startsWith(".")) candidates.add(node.local.name);
+		}
+
+		function checkCall(node: ESTree.CallExpression) {
+			// Pattern 1: expect(subject).toContain(sub), expect(subject).toMatch(regex), etc.
+			if (
+				node.callee.type === "MemberExpression" &&
+				!node.callee.computed &&
+				node.callee.property.type === "Identifier"
+			) {
+				const propertyName = node.callee.property.name;
+				if (SUBSTRING_MATCHERS.has(propertyName)) {
+					const subject = extractExpectSubject(node.callee);
+					if (subject && isConstantString(subject, context.sourceCode, candidates, context.filename)) {
+						context.report({ node, messageId: "poorSubstringTest" });
+						return;
+					}
+				}
+
+				// Pattern 1b: expect(subject).toEqual(expect.stringContaining(sub))
+				if (
+					node.arguments.length > 0 &&
+					node.arguments[0] !== undefined &&
+					node.arguments[0].type !== "SpreadElement" &&
+					isExpectStringContaining(node.arguments[0])
+				) {
+					const subject = extractExpectSubject(node.callee);
+					if (subject && isConstantString(subject, context.sourceCode, candidates, context.filename)) {
+						context.report({ node, messageId: "poorSubstringTest" });
+						return;
+					}
+				}
+			}
+
+			// Pattern 2: expect(subject.includes("sub")), expect(subject.startsWith("sub")), expect(/regex/.test(subject)), etc.
+			if (rootIdentifierName(node.callee) === "expect" && node.arguments.length > 0) {
+				const firstArg = node.arguments[0];
+				if (firstArg && firstArg.type !== "SpreadElement") {
+					const subject = extractSubstringCallSubject(firstArg);
+					if (subject && isConstantString(subject, context.sourceCode, candidates, context.filename)) {
+						context.report({ node, messageId: "poorSubstringTest" });
+						return;
+					}
+				}
+			}
+
+			// Pattern 3: assert(subject.includes("sub")), assert.ok(subject.includes("sub")), assert.isTrue(subject.includes("sub"))
+			if (
+				rootIdentifierName(node.callee) === "assert" &&
+				node.arguments.length > 0 &&
+				node.arguments[0] !== undefined &&
+				node.arguments[0].type !== "SpreadElement"
+			) {
+				const firstArg = node.arguments[0];
+
+				// 3a: assert.include(subject, "sub"), assert.match(subject, /regex/)
+				if (
+					node.callee.type === "MemberExpression" &&
+					!node.callee.computed &&
+					node.callee.property.type === "Identifier" &&
+					ASSERT_MATCHERS.has(node.callee.property.name)
+				) {
+					if (isConstantString(firstArg, context.sourceCode, candidates, context.filename)) {
+						context.report({ node, messageId: "poorSubstringTest" });
+						return;
+					}
+				}
+
+				// 3b: assert(subject.includes("sub")), assert.ok(subject.includes("sub"))
+				const subject = extractSubstringCallSubject(firstArg);
+				if (subject && isConstantString(subject, context.sourceCode, candidates, context.filename)) {
+					context.report({ node, messageId: "poorSubstringTest" });
+				}
+			}
+		}
+
 		return {
 			before() {
 				if (!isTestFile(context.filename)) return false;
 				// Every pattern needs an `expect` or `assert` callee. `\u` covers escaped identifiers.
 				const text = context.sourceCode.text;
-				return text.includes("expect") || text.includes("assert") || text.includes("\\u");
+				if (!text.includes("expect") && !text.includes("assert") && !text.includes("\\u")) return false;
+				calls.length = 0;
+				candidates.clear();
 			},
 			CallExpression(node) {
-				// Pattern 1: expect(subject).toContain(sub), expect(subject).toMatch(regex), etc.
-				if (
-					node.callee.type === "MemberExpression" &&
-					!node.callee.computed &&
-					node.callee.property.type === "Identifier"
-				) {
-					const propertyName = node.callee.property.name;
-					if (SUBSTRING_MATCHERS.has(propertyName)) {
-						const subject = extractExpectSubject(node.callee);
-						if (subject && isConstantString(subject, context.sourceCode, context.filename)) {
-							context.report({ node, messageId: "poorSubstringTest" });
-							return;
-						}
-					}
-
-					// Pattern 1b: expect(subject).toEqual(expect.stringContaining(sub))
-					if (
-						node.arguments.length > 0 &&
-						node.arguments[0] !== undefined &&
-						node.arguments[0].type !== "SpreadElement" &&
-						isExpectStringContaining(node.arguments[0])
-					) {
-						const subject = extractExpectSubject(node.callee);
-						if (subject && isConstantString(subject, context.sourceCode, context.filename)) {
-							context.report({ node, messageId: "poorSubstringTest" });
-							return;
-						}
-					}
-				}
-
-				// Pattern 2: expect(subject.includes("sub")), expect(subject.startsWith("sub")), expect(/regex/.test(subject)), etc.
-				if (rootIdentifierName(node.callee) === "expect" && node.arguments.length > 0) {
-					const firstArg = node.arguments[0];
-					if (firstArg && firstArg.type !== "SpreadElement") {
-						const subject = extractSubstringCallSubject(firstArg);
-						if (subject && isConstantString(subject, context.sourceCode, context.filename)) {
-							context.report({ node, messageId: "poorSubstringTest" });
-							return;
-						}
-					}
-				}
-
-				// Pattern 3: assert(subject.includes("sub")), assert.ok(subject.includes("sub")), assert.isTrue(subject.includes("sub"))
-				if (
-					rootIdentifierName(node.callee) === "assert" &&
-					node.arguments.length > 0 &&
-					node.arguments[0] !== undefined &&
-					node.arguments[0].type !== "SpreadElement"
-				) {
-					const firstArg = node.arguments[0];
-
-					// 3a: assert.include(subject, "sub"), assert.match(subject, /regex/)
-					if (
-						node.callee.type === "MemberExpression" &&
-						!node.callee.computed &&
-						node.callee.property.type === "Identifier" &&
-						ASSERT_MATCHERS.has(node.callee.property.name)
-					) {
-						if (isConstantString(firstArg, context.sourceCode, context.filename)) {
-							context.report({ node, messageId: "poorSubstringTest" });
-							return;
-						}
-					}
-
-					// 3b: assert(subject.includes("sub")), assert.ok(subject.includes("sub"))
-					const subject = extractSubstringCallSubject(firstArg);
-					if (subject && isConstantString(subject, context.sourceCode, context.filename)) {
-						context.report({ node, messageId: "poorSubstringTest" });
-					}
-				}
+				calls.push(node);
+			},
+			VariableDeclarator(node) {
+				if (node.init !== null && mayBeConstantString(node.init)) addBindingNames(node.id, candidates);
+			},
+			ImportSpecifier: addImportedName,
+			ImportDefaultSpecifier: addImportedName,
+			"Program:exit"() {
+				for (const node of calls) checkCall(node);
 			},
 		};
 	},

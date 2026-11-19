@@ -33,6 +33,8 @@ const arkMethods = new Set([
 	"matching", "divisibleBy", "onUndeclaredKey", "onDeepUndeclaredKey",
 ]);
 
+const ZOD_SOURCES: ReadonlyArray<string> = ["zod", "zod/v3", "zod/v4", "zod/v4/classic", "zod/v4/mini", "zod/mini"];
+
 function memberName(node: ESTree.MemberExpression): string | null {
 	if (!node.computed && node.property.type === "Identifier") return node.property.name;
 	if (node.computed && node.property.type === "Literal" && typeof node.property.value === "string") return node.property.value;
@@ -77,6 +79,13 @@ export const noPassThroughSchemaRule = defineRule({
 		// Export identifiers are resolved to variables only when an alias needs the check.
 		const exportedNames: Array<ESTree.Node & { name: string }> = [];
 		let exported: Set<Variable> | null = null;
+		let importsSchemas = false;
+
+		function isSchemaSource(source: string): boolean {
+			if (options.schemaImports?.some((entry) => entry.from === source)) return true;
+			const libraries = options.libraries ?? ["zod", "arktype"];
+			return (libraries.includes("zod") && ZOD_SOURCES.includes(source)) || (libraries.includes("arktype") && source === "arktype");
+		}
 
 		function variableFor(node: ESTree.Node & { name: string }): Variable | null {
 			let scope = context.sourceCode.getScope(node);
@@ -105,7 +114,7 @@ export const noPassThroughSchemaRule = defineRule({
 						: specifier.type === "ImportDefaultSpecifier" ? "default" : null;
 					if (name !== null && options.schemaImports?.some((entry) => entry.from === source && entry.names.includes(name))) return "schema";
 					const libraries = options.libraries ?? ["zod", "arktype"];
-					if (libraries.includes("zod") && ["zod", "zod/v3", "zod/v4", "zod/v4/classic", "zod/v4/mini", "zod/mini"].includes(source)) {
+					if (libraries.includes("zod") && ZOD_SOURCES.includes(source)) {
 						if (name === null) return "zod-module";
 						if (name === "z" || name === "default") return "zod-namespace";
 						if (zodFactories.has(name)) return "zod-factory";
@@ -162,6 +171,10 @@ export const noPassThroughSchemaRule = defineRule({
 				candidates.length = 0;
 				exportedNames.length = 0;
 				exported = null;
+				importsSchemas = false;
+			},
+			ImportDeclaration(node) {
+				importsSchemas ||= isSchemaSource(node.source.value);
 			},
 			VariableDeclarator(node) {
 				if (node.parent.type === "VariableDeclaration" && node.parent.kind === "const" && node.id.type === "Identifier" && node.init?.type === "Identifier") candidates.push(node);
@@ -178,6 +191,8 @@ export const noPassThroughSchemaRule = defineRule({
 				if (node.declaration.type === "Identifier") markExport(node.declaration);
 			},
 			"Program:exit"() {
+				// Every schema kind starts at an import from a schema source; skip scope analysis otherwise.
+				if (!importsSchemas) return;
 				for (const node of candidates) {
 					if (node.id.type !== "Identifier" || node.init?.type !== "Identifier") continue;
 					const target = kind(node.init);

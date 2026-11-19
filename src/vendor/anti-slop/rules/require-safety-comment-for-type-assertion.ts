@@ -107,15 +107,19 @@ export const requireSafetyCommentForTypeAssertionRule = defineRule({
     defaultOptions: [{ markers: ["SAFETY"] }],
   },
   createOnce(context) {
-    const patterns = new Map<string, RegExp>();
+    // Read on a file's first non-const assertion; most files have none.
+    let markers: readonly string[] | null = null;
+    // A justification comment contains a marker, so a file without one skips comment lookups.
+    let pattern: RegExp | null = null;
 
     const checkAssertion = (node: TypeAssertion) => {
       if (isConstAssertion(node)) return;
-      const markers = configuredSafetyMarkers(context.options?.[0]);
-      const patternKey = markers.join("\u0000");
-      const pattern = patterns.get(patternKey) ?? markerPattern(markers);
-      patterns.set(patternKey, pattern);
-      if (hasSafetyComment(context.sourceCode, node, pattern)) return;
+      if (markers === null) {
+        markers = configuredSafetyMarkers(context.options?.[0]);
+        const text = context.sourceCode.text;
+        if (markers.some((marker) => text.includes(marker))) pattern = markerPattern(markers);
+      }
+      if (pattern !== null && hasSafetyComment(context.sourceCode, node, pattern)) return;
       context.report({
         node,
         messageId: "missingSafetyComment",
@@ -124,6 +128,10 @@ export const requireSafetyCommentForTypeAssertionRule = defineRule({
     };
 
     return {
+      before() {
+        markers = null;
+        pattern = null;
+      },
       TSAsExpression: checkAssertion,
       TSTypeAssertion: checkAssertion,
     };
