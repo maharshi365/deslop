@@ -26,8 +26,7 @@
   },
   "dependencies": {
     "@oxlint/plugins": "1.82.0",
-    "@tailwindcss/node": "^4.3.3",
-    "synckit": "^0.11.13"
+    "@tailwindcss/node": "^4.3.3"
   },
   "peerDependencies": {
     "tailwindcss": "^4.0.0"

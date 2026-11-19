@@ -1,39 +1,68 @@
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createSyncFn } from "synckit";
+import { MessageChannel, receiveMessageOnPort, Worker } from "node:worker_threads";
+import type { CanonicalizeResult, WorkerJob, WorkerRequest, WorkerResponse } from "./worker.ts";
 
-interface LoadJob {
-	type: "load";
-	key: string;
-	cssContent: string;
-	base: string;
+/**
+ * A worker that runs jobs in order while the caller keeps working. `post` returns at once;
+ * `take` blocks until the next kept job finishes, and returns its result or throws its error.
+ */
+export interface WorkerChannel {
+	post(job: WorkerJob, keepResult: boolean): void;
+	take(): CanonicalizeResult;
 }
 
-interface CanonicalizeJob {
-	type: "canonicalize";
-	key: string;
-	candidates: Array<string>;
-	rem: number;
+/** Start a worker that speaks the `worker.ts` protocol. The worker does not keep the process alive. */
+export function startWorker(workerPath: string, workerData: Record<string, unknown> = {}): WorkerChannel {
+	const signal = new SharedArrayBuffer(4);
+	const flag = new Int32Array(signal);
+	const { port1, port2 } = new MessageChannel();
+	const worker = new Worker(workerPath, {
+		workerData: { ...workerData, deslopTailwind: true, port: port2, signal },
+		transferList: [port2],
+	});
+	worker.unref();
+	port1.unref();
+	let nextId = 0;
+	// Responses arrive in request order, and kept requests are taken in order. So while waiting for
+	// the oldest kept id, every other response that arrives belongs to a dropped request.
+	const kept: Array<number> = [];
+	let keptHead = 0;
+	return {
+		post(job, keepResult) {
+			const request: WorkerRequest = { id: ++nextId, job };
+			if (keepResult) kept.push(request.id);
+			port1.postMessage(request);
+		},
+		take() {
+			if (keptHead === kept.length) throw new Error("No posted job to take");
+			const id = kept[keptHead++];
+			if (keptHead === kept.length) {
+				kept.length = 0;
+				keptHead = 0;
+			}
+			for (;;) {
+				const seen = Atomics.load(flag, 0);
+				for (let message = receiveMessageOnPort(port1); message !== undefined; message = receiveMessageOnPort(port1)) {
+					const response = message.message as WorkerResponse;
+					if (response.id !== id) continue;
+					if ("error" in response) throw new Error(response.error);
+					return response.result;
+				}
+				Atomics.wait(flag, 0, seen);
+			}
+		},
+	};
 }
 
-type WorkerJob = LoadJob | CanonicalizeJob;
-type WorkerResult = { ok: true } | Array<string>;
-type WorkerFunction = (job: WorkerJob) => Promise<WorkerResult>;
+// `tsc` emits `worker.ts` as `dist/tailwind/worker.js` next to this file; Node cannot type-strip
+// `.ts` files under node_modules, so consumers always load the compiled worker. Tests load sources.
+const workerPath = fileURLToPath(new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.js", import.meta.url));
+let channel: WorkerChannel | null = null;
 
-// Resolved relative to the compiled output: `tsc` emits `worker.ts` as
-// `dist/tailwind/worker.js` next to this file, and consumers load the
-// package from `dist`, where Node cannot type-strip `.ts` under node_modules.
-const workerPath = fileURLToPath(new URL("./worker.js", import.meta.url));
-let syncCall: ReturnType<typeof createSyncFn<WorkerFunction>> | null = null;
-const loadedSystems = new Map<string, number>();
-const canonicalResults = new Map<string, Map<number, Map<string, string>>>();
-
-function getSyncCall(): ReturnType<typeof createSyncFn<WorkerFunction>> {
-	if (syncCall === null) {
-		syncCall = createSyncFn<WorkerFunction>(workerPath);
-	}
-	return syncCall;
+function worker(): WorkerChannel {
+	channel ??= startWorker(workerPath);
+	return channel;
 }
 
 export function resolveCssPath(cssPath: string | undefined, cwd = process.cwd()): string {
@@ -41,36 +70,17 @@ export function resolveCssPath(cssPath: string | undefined, cwd = process.cwd())
 	return path.isAbsolute(cssPath) ? cssPath : path.resolve(cwd, cssPath);
 }
 
-export function ensureDesignSystem(cssFile: string): string {
-	const stat = fs.statSync(cssFile);
-	if (loadedSystems.get(cssFile) === stat.mtimeMs) return cssFile;
-
-	const cssContent = fs.readFileSync(cssFile, "utf8");
-	getSyncCall()({ type: "load", key: cssFile, cssContent, base: path.dirname(cssFile) });
-	loadedSystems.set(cssFile, stat.mtimeMs);
-	canonicalResults.delete(cssFile);
-	return cssFile;
+/** Load the design system in the background, or reload it if its CSS file changed. */
+export function loadDesignSystem(cssFile: string): void {
+	worker().post({ type: "load", cssFile }, false);
 }
 
-export function getDesignSystemVersion(key: string): number | undefined {
-	return loadedSystems.get(key);
+/** Start canonicalizing class strings in the background. Collect the result with `takeRewrites`. */
+export function postClassValues(cssFile: string, values: ReadonlyArray<string>, rem: number): void {
+	worker().post({ type: "canonicalize", cssFile, values, rem }, true);
 }
 
-export function canonicalizeTokens(key: string, tokens: Array<string>, rem: number): Map<string, string> {
-	if (tokens.length === 0) return new Map();
-
-	let byRem = canonicalResults.get(key);
-	if (!byRem) canonicalResults.set(key, byRem = new Map());
-	let cached = byRem.get(rem);
-	if (!cached) byRem.set(rem, cached = new Map());
-	const missing = [...new Set(tokens.filter(token => !cached.has(token)))];
-	if (missing.length > 0) {
-		const canonical = getSyncCall()({ type: "canonicalize", key, candidates: missing, rem });
-		if (!Array.isArray(canonical)) throw new Error("Tailwind canonicalization returned an invalid result");
-		for (let i = 0; i < missing.length; i++) cached.set(missing[i], canonical[i] ?? missing[i]);
-	}
-
-	const result = new Map<string, string>();
-	for (const token of tokens) result.set(token, cached.get(token)!);
-	return result;
+/** Wait for the oldest posted class strings. Returns null when the CSS entry cannot be loaded. */
+export function takeRewrites(): CanonicalizeResult {
+	return worker().take();
 }

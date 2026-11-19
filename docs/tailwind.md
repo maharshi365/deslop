@@ -83,9 +83,11 @@ The benchmark runs the real rule callbacks and Tailwind worker against 100,000 c
 
 `coldMs` includes worker startup, CSS loading, and the first class check. `warmMs` measures the remaining workload. `totalMs` includes both. Results depend on the machine and the amount of class reuse.
 
-Canonical results are cached by CSS entry and root font size. Reloading the entry CSS clears them. String rewrites are reused across files when the entry CSS version and font size match, with a limit of 10,000 retained strings. Each occurrence still gets its own diagnostic and fix.
+The rule keeps no results of its own between strings or files. The worker starts loading the CSS entry on the first linted file. Class strings go to the worker while the file is traversed, and the rule reports them when the file ends. Each file checks the entry CSS once and reloads it when it changed. Each occurrence gets its own diagnostic and fix.
 
-The worker partitions Tailwind's canonicalization index by declaration property set. Only classes with compatible properties participate in each lookup. It discovers properties through utility compilers without generating selectors or declaration sort orders, and reuses variant ordering until a new valid variant is parsed. This uses the design system returned by Tailwind's unstable API; output-equivalence tests cover themes, custom utilities, modifiers, variants, prefixes, and font sizes.
+The worker uses one Tailwind design system. Tailwind normally computes a signature for every listed class before its first lookup. Instead, the worker groups class spellings once by declared property set, and computes signatures only for the group that a looked-up signature can match. When Tailwind compares candidate replacements, one with different declared properties is rejected before its signature is computed. Variant order is sorted only when a compiled candidate has variants. This uses the design system returned by Tailwind's unstable API; output-equivalence tests cover themes, custom utilities, modifiers, variants, prefixes, and font sizes.
+
+`bench-corpus.mjs` measures whole Oxlint runs on pinned open-source projects; see the comment at the top of that file.
 
 Local measurements on Windows with Node 22.21.1 and Tailwind 4.3.3:
 
@@ -99,6 +101,9 @@ Local measurements on Windows with Node 22.21.1 and Tailwind 4.3.3:
 | Varied: partitioned index | 486 ms | 206 ms | 703 ms | 6.34× |
 | Varied: cheaper property discovery | 381 ms | 219 ms | 601 ms | 7.42× |
 | Varied: cross-file rewrites | 363 ms | 68 ms | 431 ms | 10.34× |
+| Varied: no rule caches, one shared design system | 378 ms | 237 ms | 620 ms | 7.19× |
+
+The last design is slower in this synthetic loop, which repeats the same strings in every file, but faster on real projects: on the pinned corpus of `bench-corpus.mjs`, the rule's added wall time fell from 6,527 ms to 2,310 ms, and its CPU time from 10,390 ms to 5,500 ms.
 
 Each column is a separate median, so cold and warm values may not sum to the total. These are synthetic rule workloads, not a guarantee of total-project lint speed.
 

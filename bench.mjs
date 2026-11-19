@@ -91,11 +91,14 @@ if (process.argv.includes("--project")) {
 		const start = performance.now();
 		visitor.before();
 		visitor.JSXAttribute(nodes[0]);
+		visitor["Program:exit"]();
+		reports = 0;
 		const coldMs = performance.now() - start;
 		const warmStart = performance.now();
 		for (let file = 0; file < files; file++) {
 			visitor.before();
 			for (let i = 0; i < stringsPerFile; i++) visitor.JSXAttribute(nodes[(file * stringsPerFile + i) % nodes.length]);
+			visitor["Program:exit"]();
 		}
 		const warmMs = performance.now() - warmStart;
 		assert.equal(reports, files * stringsPerFile / 2);

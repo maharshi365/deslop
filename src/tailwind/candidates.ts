@@ -1,38 +1,39 @@
-export interface SpellingChange {
-	original: string;
-	canonical: string;
-}
+/** A class string with every non-canonical token replaced, plus its first change and change count. */
+export type Rewrite = readonly [fixed: string, original: string, canonical: string, changes: number];
 
-export function rewriteClassValue(
-	value: string,
-	canonicalOf: ReadonlyMap<string, string>,
-): { fixed: string; changes: Array<SpellingChange> } {
-	const changes: Array<SpellingChange> = [];
-	const fixed = value.replace(/\S+/g, (token) => {
-		const canonical = canonicalOf.get(token);
-		if (canonical !== undefined && canonical !== token) {
-			changes.push({ original: token, canonical });
-			return canonical;
+const TOKEN = /\S+/g;
+
+/** Rewrite each whitespace-separated class token. Returns null when every token is canonical. */
+export function rewriteClassValue(value: string, canonicalize: (token: string) => string): Rewrite | null {
+	let fixed = "";
+	let end = 0;
+	let changes = 0;
+	let original = "";
+	let canonical = "";
+	for (const match of value.matchAll(TOKEN)) {
+		const token = match[0];
+		const replacement = canonicalize(token);
+		if (replacement === token) continue;
+		if (changes++ === 0) {
+			original = token;
+			canonical = replacement;
 		}
-		return token;
-	});
-	return { fixed, changes };
+		fixed += value.slice(end, match.index) + replacement;
+		end = match.index + token.length;
+	}
+	return changes === 0 ? null : [fixed + value.slice(end), original, canonical, changes];
 }
 
-export function uniqueTokens(value: string): Array<string> {
-	const tokens = value.match(/\S+/g) ?? [];
-	return [...new Set(tokens)];
+/** Whether `text` contains `name` with no ASCII identifier character on either side. */
+export function mentionsName(text: string, name: string): boolean {
+	if (name === "") return false;
+	for (let index = text.indexOf(name); index !== -1; index = text.indexOf(name, index + 1)) {
+		if (!isIdentifierCode(text.charCodeAt(index - 1)) && !isIdentifierCode(text.charCodeAt(index + name.length))) return true;
+	}
+	return false;
 }
 
-export function summarizeChanges(changes: ReadonlyArray<SpellingChange>): {
-	original: string;
-	canonical: string;
-	suffix: string;
-} {
-	const first = changes[0];
-	return {
-		original: first.original,
-		canonical: first.canonical,
-		suffix: changes.length > 1 ? ` (+${changes.length - 1} more in this string)` : "",
-	};
+// NaN (out of range) and non-ASCII codes count as boundaries, so a real occurrence is never missed.
+function isIdentifierCode(code: number): boolean {
+	return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 36 || code === 95;
 }

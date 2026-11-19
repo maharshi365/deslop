@@ -1,102 +1,91 @@
-import type { Context, ESTree } from "@oxlint/plugins";
-import { beforeEach, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { RuleTester } from "oxlint/plugins-dev";
+import { describe, expect, it } from "vitest";
 
-const mocks = vi.hoisted(() => ({ canonicalize: vi.fn(), ensure: vi.fn(), version: vi.fn() }));
-vi.mock("../src/tailwind/design-system.ts", () => ({
-	resolveCssPath: (value: string) => value,
-	ensureDesignSystem: mocks.ensure,
-	canonicalizeTokens: mocks.canonicalize,
-	getDesignSystemVersion: mocks.version,
-}));
+import { mentionsName } from "../src/tailwind/candidates.ts";
 import { canonicalClassNames } from "../src/tailwind/rule.ts";
 
-beforeEach(() => {
-	vi.clearAllMocks();
-	mocks.ensure.mockReturnValue("/styles.css");
-	mocks.version.mockReturnValue(1);
-	mocks.canonicalize.mockReturnValue(new Map([["mt-[16px]", "mt-4"], ["flex", "flex"]]));
+RuleTester.describe = describe;
+RuleTester.it = it;
+
+const theme = path.resolve("node_modules/tailwindcss/theme.css").replaceAll("\\", "/");
+const cssPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "deslop-rule-")), "styles.css");
+fs.writeFileSync(cssPath, `@import ${JSON.stringify(theme)};\n@tailwind utilities;\n`);
+const options = [{ cssPath }];
+
+const ruleTester = new RuleTester({ languageOptions: { parserOptions: { lang: "tsx" } } });
+
+ruleTester.run("canonical-class-names", canonicalClassNames, {
+	valid: [
+		{ code: '<div className="flex gap-4 custom-component" />', options },
+		{ name: "skips interpolated templates", code: "<div className={`mt-[16px] ${size}`} />", options },
+		{ name: "skips unconfigured attributes", code: '<div data-class="mt-[16px]" />', options },
+		{ name: "skips unconfigured helpers", code: 'merge("mt-[16px]");', options },
+	],
+	invalid: [
+		{
+			name: "reports and fixes every occurrence, including repeated strings",
+			code: '<><div className="mt-[16px] flex" /><div className="mt-[16px] flex" /><div class=\'px-[16px] py-[16px]\' /></>',
+			output: '<><div className="mt-4 flex" /><div className="mt-4 flex" /><div class=\'px-4 py-4\' /></>',
+			options,
+			errors: [
+				{ messageId: "nonCanonical", data: { original: "mt-[16px]", canonical: "mt-4", suffix: "" } },
+				{ messageId: "nonCanonical", data: { original: "mt-[16px]", canonical: "mt-4", suffix: "" } },
+				{ messageId: "nonCanonical", data: { original: "px-[16px]", canonical: "px-4", suffix: " (+1 more in this string)" } },
+			],
+		},
+		{
+			name: "checks string arguments of helper calls, including member calls",
+			code: 'cn("px-[16px]", active && "font-bold");\nstyles.cx(`w-[2px]`);',
+			output: 'cn("px-4", active && "font-bold");\nstyles.cx(`w-0.5`);',
+			options,
+			errors: [{ messageId: "nonCanonical" }, { messageId: "nonCanonical" }],
+		},
+		{
+			name: "maps each result to its string when a file has more strings than one worker chunk",
+			code: ["cn('mt-[16px]')", ...Array.from({ length: 10 }, (_, i) => `cn('flex gap-${i}')`), "cn('px-[16px]')"].join(";\n"),
+			output: ["cn('mt-4')", ...Array.from({ length: 10 }, (_, i) => `cn('flex gap-${i}')`), "cn('px-4')"].join(";\n"),
+			options,
+			errors: [
+				{ messageId: "nonCanonical", line: 1, data: { original: "mt-[16px]", canonical: "mt-4", suffix: "" } },
+				{ messageId: "nonCanonical", line: 12, data: { original: "px-[16px]", canonical: "px-4", suffix: "" } },
+			],
+		},
+		{
+			name: "uses the root font size",
+			code: '<div className="mt-[20px]" />',
+			output: '<div className="mt-4" />',
+			options: [{ cssPath, rootFontSize: 20 }],
+			errors: [{ messageId: "nonCanonical", data: { original: "mt-[20px]", canonical: "mt-4", suffix: "" } }],
+		},
+		{
+			name: "replaces the default names with configured ones",
+			code: '<div tw="mt-[16px]" className="mt-[16px]" />;\nvariants("mt-[16px]");',
+			output: '<div tw="mt-4" className="mt-[16px]" />;\nvariants("mt-4");',
+			options: [{ cssPath, attributes: ["tw"], calleeFunctions: ["variants"] }],
+			errors: [{ messageId: "nonCanonical" }, { messageId: "nonCanonical" }],
+		},
+		{
+			name: "reports each class string when the CSS entry cannot be loaded",
+			code: '<div className="mt-[16px]" />;\ncn("flex");',
+			options: [{ cssPath: path.join(path.dirname(cssPath), "missing.css") }],
+			errors: [{ messageId: "cssNotFound" }, { messageId: "cssNotFound" }],
+		},
+	],
 });
 
-it("reuses repeated strings but reports and fixes each occurrence", () => {
-	const report = vi.fn();
-	const context = { options: [{ cssPath: "/styles.css" }], sourceCode: { text: "className", getText: () => '"mt-[16px] flex"' }, report };
-	if (!("createOnce" in canonicalClassNames)) throw new Error("Expected a createOnce rule");
-	const visitor = canonicalClassNames.createOnce(context as unknown as Context);
-	const node = () => ({ type: "JSXAttribute", name: { type: "JSXIdentifier", name: "className" }, value: { type: "Literal", value: "mt-[16px] flex" } }) as ESTree.JSXAttribute;
-	const first = node();
-	const second = node();
-	visitor.before?.();
-	visitor.JSXAttribute?.(first);
-	visitor.JSXAttribute?.(second);
-	expect(mocks.canonicalize).toHaveBeenCalledTimes(1);
-	expect(report.mock.calls.map(([data]) => data.node)).toEqual([first.value, second.value]);
-	for (const [data] of report.mock.calls) {
-		expect(data.messageId).toBe("nonCanonical");
-		expect(data.fix({ replaceText: (node: unknown, text: string) => text })).toBe('"mt-4 flex"');
-	}
-});
+describe("mentionsName", () => {
+	it("matches whole identifiers only", () => {
+		expect(mentionsName("const between = 2;", "tw")).toBe(false);
+		expect(mentionsName("const $cn = cn_;", "cn")).toBe(false);
+		expect(mentionsName("x = tw(`p-4`)", "tw")).toBe(true);
+		expect(mentionsName("styles.cx(a)", "cx")).toBe(true);
+		expect(mentionsName("cn", "cn")).toBe(true);
+	});
 
-it("does not reuse string rewrites after CSS changes between files", () => {
-	const report = vi.fn();
-	const context = { options: [{ cssPath: "/styles.css" }], sourceCode: { text: "className" }, report };
-	if (!("createOnce" in canonicalClassNames)) throw new Error("Expected a createOnce rule");
-	const visitor = canonicalClassNames.createOnce(context as unknown as Context);
-	const node = { type: "JSXAttribute", name: { type: "JSXIdentifier", name: "className" }, value: { type: "Literal", value: "mt-[16px] flex" } } as ESTree.JSXAttribute;
-	visitor.before?.();
-	visitor.JSXAttribute?.(node);
-	mocks.canonicalize.mockReturnValue(new Map([["mt-[16px]", "mt-custom"], ["flex", "flex"]]));
-	mocks.version.mockReturnValue(2);
-	visitor.before?.();
-	visitor.JSXAttribute?.(node);
-	expect(report.mock.calls.map(([data]) => data.data.canonical)).toEqual(["mt-4", "mt-custom"]);
-});
-
-it("reuses string rewrites across files with the same CSS and font size", () => {
-	const report = vi.fn();
-	const context = { options: [{ cssPath: "/styles.css" }], sourceCode: { text: "className" }, report };
-	if (!("createOnce" in canonicalClassNames)) throw new Error("Expected a createOnce rule");
-	const visitor = canonicalClassNames.createOnce(context as unknown as Context);
-	const node = { type: "JSXAttribute", name: { type: "JSXIdentifier", name: "className" }, value: { type: "Literal", value: "mt-[16px] flex" } } as ESTree.JSXAttribute;
-	visitor.before?.();
-	visitor.JSXAttribute?.(node);
-	visitor.before?.();
-	visitor.JSXAttribute?.(node);
-	expect(mocks.canonicalize).toHaveBeenCalledTimes(1);
-	expect(mocks.ensure).toHaveBeenCalledTimes(2);
-	expect(report).toHaveBeenCalledTimes(2);
-});
-
-it.each([
-	{ cssPath: "/other.css", rootFontSize: 16 },
-	{ cssPath: "/styles.css", rootFontSize: 20 },
-])("does not share rewrites when options change to %o", options => {
-	const report = vi.fn();
-	const context = { options: [{ cssPath: "/styles.css", rootFontSize: 16 }], sourceCode: { text: "className" }, report };
-	if (!("createOnce" in canonicalClassNames)) throw new Error("Expected a createOnce rule");
-	const visitor = canonicalClassNames.createOnce(context as unknown as Context);
-	const node = { type: "JSXAttribute", name: { type: "JSXIdentifier", name: "className" }, value: { type: "Literal", value: "mt-[16px] flex" } } as ESTree.JSXAttribute;
-	visitor.before?.();
-	visitor.JSXAttribute?.(node);
-	context.options[0] = options;
-	mocks.canonicalize.mockReturnValue(new Map([["mt-[16px]", "mt-custom"], ["flex", "flex"]]));
-	visitor.before?.();
-	visitor.JSXAttribute?.(node);
-	expect(report.mock.calls.map(([data]) => data.data.canonical)).toEqual(["mt-4", "mt-custom"]);
-});
-
-it("bounds retained string rewrites in long-running sessions", () => {
-	const context = { options: [{ cssPath: "/styles.css" }], sourceCode: { text: "className" }, report: vi.fn() };
-	if (!("createOnce" in canonicalClassNames)) throw new Error("Expected a createOnce rule");
-	const visitor = canonicalClassNames.createOnce(context as unknown as Context);
-	visitor.before?.();
-	const first = { type: "JSXAttribute", name: { type: "JSXIdentifier", name: "className" }, value: { type: "Literal", value: "flex first" } } as ESTree.JSXAttribute;
-	visitor.JSXAttribute?.(first);
-	for (let i = 0; i < 10_000; i++) {
-		visitor.JSXAttribute?.({ ...first, value: { type: "Literal", value: `flex custom-${i}` } } as ESTree.JSXAttribute);
-	}
-	mocks.canonicalize.mockClear();
-	visitor.JSXAttribute?.(first);
-	expect(mocks.canonicalize).toHaveBeenCalledTimes(1);
-	visitor.JSXAttribute?.(first);
-	expect(mocks.canonicalize).toHaveBeenCalledTimes(1);
+	it("treats non-ASCII characters as boundaries, so Unicode whitespace never hides a name", () => {
+		expect(mentionsName("x = cn('p-4')", "cn")).toBe(true);
+	});
 });
