@@ -46,6 +46,7 @@ All rules below are enabled by the recommended config unless listed as opt-in.
 | `no-widen-then-assert` | Rejects widening known evidence before narrowing assertions. |
 | `require-safety-comment-for-type-assertion` | Requires an invariant justification for non-const assertions. |
 | `no-pass-through-type-alias` | Disallows aliases that only rename another type. |
+| [`prefer-literal-union`](docs/prefer-literal-union.md) | Reports variables typed `string` in the same file that are only compared to two or more string literals. No fixer. |
 
 ### Code quality and APIs
 

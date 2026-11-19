@@ -28,6 +28,7 @@ import { noDuplicateConstsRule } from "./rules/no-duplicate-consts.ts";
 import { noRenamedImportsRule } from "./rules/no-renamed-imports.ts";
 import { noReexportsOutsideEntrypointsRule } from "./rules/no-reexports-outside-entrypoints.ts";
 import { maxBooleanConditionsRule } from "./rules/max-boolean-conditions.ts";
+import { preferLiteralUnionRule } from "./rules/prefer-literal-union.ts";
 import { canonicalClassNames } from "./tailwind/rule.ts";
 
 /** Recommended `deslop/*` rules, plus selected standard rules, each set to `"error"`. Spread into the `rules` field of an oxlint config. */
@@ -54,6 +55,7 @@ export const recommendedRules: Record<string, "error" | ["error", { selector: st
 	"deslop/no-poor-substring-tests": "error",
 	"deslop/no-repeated-expect-call": "error",
 	"deslop/no-pass-through-type-alias": "error",
+	"deslop/prefer-literal-union": "error",
 	"typescript/no-deprecated": "error",
 	"typescript/no-require-imports": "error",
 	"typescript/no-floating-promises": "error",
@@ -113,6 +115,7 @@ const deslopPlugin = eslintCompatPlugin({
 		"no-renamed-imports": noRenamedImportsRule,
 		"no-reexports-outside-entrypoints": noReexportsOutsideEntrypointsRule,
 		"max-boolean-conditions": maxBooleanConditionsRule,
+		"prefer-literal-union": preferLiteralUnionRule,
 		// Opt-in: NOT in `recommendedRules`. Requires a `cssPath` option, so users add it manually.
 		"canonical-class-names": canonicalClassNames,
 	},

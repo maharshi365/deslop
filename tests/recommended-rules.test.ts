@@ -21,6 +21,11 @@ it("requires exhaustive switches in the recommended config", () => {
 	expect(configs.recommended.options.typeAware).toBe(true);
 });
 
+it("enables literal union checks in the recommended config", () => {
+	expect(plugin.rules).toHaveProperty("prefer-literal-union");
+	expect(recommendedRules["deslop/prefer-literal-union"]).toBe("error");
+});
+
 it("rejects inferrable type annotations in the recommended config", () => {
 	expect(configs.recommended.rules["typescript/no-inferrable-types"]).toBe("error");
 });
