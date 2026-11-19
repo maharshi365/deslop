@@ -18,6 +18,8 @@ function title(dialog: Dialog) { ... }
 
 With a literal union, TypeScript catches typos and unreachable branches. The recommended config also enables `typescript/switch-exhaustiveness-check`, which then reports a `switch` that misses a case.
 
+Before you create a new union or inline one, search the codebase for an existing type for the same values. The message says this too.
+
 ## Comparisons
 
 The rule counts these comparisons for each variable:

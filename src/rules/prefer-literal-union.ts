@@ -146,7 +146,7 @@ export const preferLiteralUnionRule = defineRule({
 		docs: { description: "Prefer a literal union over `string` when a variable is compared to fixed string literals" },
 		messages: {
 			preferLiteralUnion:
-				"`{{name}}` is typed `{{type}}` but is only compared to {{literals}}. Type it as a literal union, such as `{{union}}`, or a named union type.",
+				"`{{name}}` is typed `{{type}}` but is only compared to {{literals}}. Type it as a literal union, such as `{{union}}`, or a named union type. Before you create a new type or inline one, search the codebase for an existing type for these values.",
 		},
 		schema: [],
 	},

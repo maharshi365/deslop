@@ -11,7 +11,7 @@ const ruleTester = new RuleTester({
 });
 
 function message(name: string, type: string, literals: string, union: string): string {
-	return `\`${name}\` is typed \`${type}\` but is only compared to ${literals}. Type it as a literal union, such as \`${union}\`, or a named union type.`;
+	return `\`${name}\` is typed \`${type}\` but is only compared to ${literals}. Type it as a literal union, such as \`${union}\`, or a named union type. Before you create a new type or inline one, search the codebase for an existing type for these values.`;
 }
 
 const ab = message("x", "string", '"a" and "b"', '"a" | "b"');
