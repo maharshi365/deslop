@@ -16,6 +16,7 @@
   ],
   "scripts": {
     "bench": "npm run build && node bench.mjs",
+    "bench:corpus": "npm run build && node bench-corpus.mjs",
     "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "npm run build",
     "check": "npm run build && oxlint src && tsc --noEmit",
